@@ -1,0 +1,39 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.leve.teclado'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.leve.teclado'
+        minSdk 21
+        targetSdk 34
+        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+        versionName "1.0." + (System.getenv('GITHUB_RUN_NUMBER') ?: '0')
+    }
+
+    signingConfigs {
+        leve {
+            storeFile file('leve.jks')
+            storePassword 'leveteclado'
+            keyAlias 'leve'
+            keyPassword 'leveteclado'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.leve
+        }
+        debug { signingConfig signingConfigs.leve }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    lint { abortOnError false; checkReleaseBuilds false }
+}
