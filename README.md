@@ -14,6 +14,10 @@ Vá em **Releases** → baixe `Leve-Teclado.apk` → instale → abra o app → 
 - Copiar sem seleção = copia o campo inteiro
 - Backup/restauração em .json
 
+**Emojis:** tecla 😊 abre o painel com recentes e 10 categorias; ⌫ apaga o emoji inteiro.
+
+**Sugestões estilo Gboard:** completa palavras, corrige acentos (nao → não), aprende o seu vocabulário, ⌫ logo após corrigir desfaz a correção, segurar uma sugestão esquece a palavra.
+
 **Barra rápida:** Tudo · Copiar · Recortar · Colar · ◀ ▶ · Selecionar · ⇤ ⇥ · Desfazer/Refazer · trocar teclado · ⚙
 
 **Gestos (inspirados no Gboard, SwiftKey e iPhone)**
@@ -26,6 +30,6 @@ Vá em **Releases** → baixe `Leve-Teclado.apk` → instale → abra o app → 
 - Digitação rápida com dois dedos (rollover)
 - Atalhos de texto: `@@` + espaço → seu e-mail
 
-**Acessibilidade:** altura das teclas, tamanho das letras, tempo do toque longo, prévia ampliada, tema Alto contraste, AMOLED preto (economiza bateria), Escuro e Claro.
+**Acessibilidade:** altura das teclas, tamanho das letras, tempo do toque longo, prévia ampliada, tema **Conforto** (minimalista, teclas grandes e espaçadas para dedos grandes), Alto contraste, AMOLED preto (economiza bateria), Escuro e Claro.
 
 O APK é compilado automaticamente pelo GitHub Actions a cada push.

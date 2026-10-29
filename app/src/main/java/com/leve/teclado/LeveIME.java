@@ -30,9 +30,9 @@ import java.util.Map;
 
 public final class LeveIME extends InputMethodService
         implements KeyboardView.Listener, ClipPanel.Host, ClipboardManager.OnPrimaryClipChangedListener,
-        ClipStore.Listener {
+        ClipStore.Listener, EmojiPanel.Host {
 
-    private static final int MODE_KEYS = 0, MODE_CLIP = 1, MODE_SEARCH = 2;
+    private static final int MODE_KEYS = 0, MODE_CLIP = 1, MODE_SEARCH = 2, MODE_EMOJI = 3;
 
     private Prefs prefs;
     private Theme theme;
@@ -44,7 +44,17 @@ public final class LeveIME extends InputMethodService
     private HorizontalScrollView toolbar;
     private KeyboardView keyboard;
     private ClipPanel panel;
+    private EmojiPanel emojiPanel;
     private TextView latestChip, selChip;
+    private android.widget.FrameLayout topBar;
+    private LinearLayout sugBar;
+    private final TextView[] sugViews = new TextView[3];
+    private final String[] sugWords = new String[3];
+    private Dictionary dict;
+    private String curWord = "";
+    private boolean suggestOk, correctOk, forceToolbar;
+    private String lastFixTyped, lastFixWord; // para desfazer a correção com ⌫
+    private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
 
     private int mode = MODE_KEYS;
     private int layer = Layouts.LETTERS;
@@ -64,6 +74,7 @@ public final class LeveIME extends InputMethodService
         store = ClipStore.get(this);
         store.max = prefs.historyMax;
         store.addListener(this);
+        dict = Dictionary.get(this);
         clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard != null) clipboard.addPrimaryClipChangedListener(this);
     }
@@ -94,12 +105,21 @@ public final class LeveIME extends InputMethodService
         toolbarRow.setPadding(p, p, p, p);
         toolbar.addView(toolbarRow);
         buildToolbar();
-        root.addView(toolbar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
+        topBar = new android.widget.FrameLayout(this);
+        topBar.addView(toolbar, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        buildSuggestionBar();
+        topBar.addView(sugBar, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(topBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (44 * dp)));
 
         panel = new ClipPanel(this, store, this);
         panel.setVisibility(View.GONE);
         root.addView(panel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0));
+
+        emojiPanel = new EmojiPanel(this, this);
+        emojiPanel.setVisibility(View.GONE);
+        root.addView(emojiPanel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0));
 
         keyboard = new KeyboardView(this);
         keyboard.setListener(this);
@@ -126,6 +146,16 @@ public final class LeveIME extends InputMethodService
                     ? Layouts.NUMPAD : Layouts.LETTERS;
         }
         if (cls == InputType.TYPE_CLASS_DATETIME) layer = Layouts.SYMBOLS;
+        boolean web = variation == InputType.TYPE_TEXT_VARIATION_URI
+                || variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+                || variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
+                || variation == InputType.TYPE_TEXT_VARIATION_FILTER;
+        suggestOk = prefs.suggestions && cls == InputType.TYPE_CLASS_TEXT && !passwordField && !web;
+        correctOk = suggestOk && prefs.autoCorrect
+                && (info.inputType & InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) == 0;
+        lastFixTyped = null;
+        curWord = "";
+        forceToolbar = false;
         shiftState = 0;
         selectMode = false;
         selStart = info.initialSelStart;
@@ -135,6 +165,7 @@ public final class LeveIME extends InputMethodService
         updateEnterLabel(info);
         autoShift();
         captureCurrentClip();
+        updateSuggestions();
     }
 
     @Override
@@ -147,9 +178,14 @@ public final class LeveIME extends InputMethodService
         if (root == null) return;
         theme = Theme.of(prefs.theme);
         root.setBackgroundColor(theme.bg);
-        toolbar.setVisibility(prefs.showToolbar ? View.VISIBLE : View.GONE);
+        LinearLayout.LayoutParams tb = (LinearLayout.LayoutParams) topBar.getLayoutParams();
+        tb.height = (int) ((theme.big ? 52 : 44) * dp);
+        topBar.setLayoutParams(tb);
+        topBar.setVisibility(prefs.showToolbar || prefs.suggestions ? View.VISIBLE : View.GONE);
         styleToolbar();
+        styleSuggestions();
         panel.applyTheme(theme);
+        emojiPanel.applyTheme(theme);
         keyboard.configure(prefs, Layouts.build(layer, prefs.numberRow));
         keyboard.setShiftState(shiftState);
         refreshLatestChip();
@@ -159,6 +195,7 @@ public final class LeveIME extends InputMethodService
 
     private void buildToolbar() {
         tool("📋", new Runnable() { public void run() { setMode(mode == MODE_KEYS ? MODE_CLIP : MODE_KEYS); } });
+        tool("😊", new Runnable() { public void run() { setMode(mode == MODE_EMOJI ? MODE_KEYS : MODE_EMOJI); } });
         latestChip = tool("📎", new Runnable() { public void run() { pasteLatest(); } });
         tool("Tudo", new Runnable() { public void run() { menu(android.R.id.selectAll); } });
         tool("Copiar", new Runnable() { public void run() { copy(); } });
@@ -220,14 +257,19 @@ public final class LeveIME extends InputMethodService
         toolbar.setBackgroundColor(theme.bar);
         for (int i = 0; i < toolbarRow.getChildCount(); i++) {
             TextView t = (TextView) toolbarRow.getChildAt(i);
-            boolean on = (t == selChip && selectMode) || (i == 0 && mode != MODE_KEYS);
+            boolean on = (t == selChip && selectMode)
+                    || (i == 0 && (mode == MODE_CLIP || mode == MODE_SEARCH)) || (i == 1 && mode == MODE_EMOJI);
             GradientDrawable g = new GradientDrawable();
-            g.setCornerRadius(14 * dp);
-            g.setColor(on ? theme.accent : theme.keySpecial);
-            if (t == latestChip && !on) g.setStroke((int) dp, theme.accent);
+            g.setCornerRadius(theme.big ? 18 * dp : 14 * dp);
+            // tema Conforto: sem caixas, só o texto (minimalista)
+            g.setColor(on ? theme.accent : (theme.big ? 0 : theme.keySpecial));
+            if (t == latestChip && !on) g.setStroke((int) dp, theme.big ? theme.textDim : theme.accent);
             else if (theme.outlined()) g.setStroke((int) dp, theme.textDim);
             t.setBackground(g);
             t.setTextColor(on ? 0xFF000000 : theme.barText);
+            t.setTextSize(theme.big ? 16 : 14);
+            int h = (int) ((theme.big ? 14 : 11) * dp);
+            t.setPadding(h, t.getPaddingTop(), h, t.getPaddingBottom());
         }
     }
 
@@ -250,6 +292,18 @@ public final class LeveIME extends InputMethodService
         if (panel == null) return;
         int kbH = keyboard.computeHeight();
         LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) panel.getLayoutParams();
+        LinearLayout.LayoutParams elp = (LinearLayout.LayoutParams) emojiPanel.getLayoutParams();
+        if (m == MODE_EMOJI) {
+            elp.height = Math.max(kbH, (int) (220 * dp));
+            emojiPanel.setLayoutParams(elp);
+            emojiPanel.setVisibility(View.VISIBLE);
+            panel.setVisibility(View.GONE);
+            keyboard.setVisibility(View.GONE);
+            styleToolbar();
+            updateSuggestions();
+            return;
+        }
+        emojiPanel.setVisibility(View.GONE);
         if (m == MODE_KEYS) {
             panel.setVisibility(View.GONE);
             keyboard.setVisibility(View.VISIBLE);
@@ -269,6 +323,148 @@ public final class LeveIME extends InputMethodService
         }
         panel.setLayoutParams(lp);
         styleToolbar();
+        updateSuggestions();
+    }
+
+    // EmojiPanel.Host
+    @Override public void onEmoji(String emoji) {
+        InputConnection ic = getCurrentInputConnection();
+        if (ic != null) ic.commitText(emoji, 1);
+    }
+
+    @Override public void onEmojiBackspace() {
+        InputConnection ic = getCurrentInputConnection();
+        if (ic == null) return;
+        if (selStart != selEnd && selStart >= 0) { ic.commitText("", 1); return; }
+        // apaga um emoji inteiro (alguns têm vários caracteres)
+        CharSequence b = ic.getTextBeforeCursor(16, 0);
+        if (b == null || b.length() == 0) { key(KeyEvent.KEYCODE_DEL, 0); return; }
+        java.text.BreakIterator it = java.text.BreakIterator.getCharacterInstance();
+        String str = b.toString();
+        it.setText(str);
+        int end = it.last();
+        int start = it.previous();
+        if (start == java.text.BreakIterator.DONE) start = 0;
+        ic.deleteSurroundingText(Math.max(1, end - start), 0);
+    }
+
+    @Override public void onEmojiSpace() {
+        InputConnection ic = getCurrentInputConnection();
+        if (ic != null) ic.commitText(" ", 1);
+    }
+
+    @Override public void closeEmoji() { setMode(MODE_KEYS); }
+
+    // ------------------------------------------------------------ sugestões (estilo Gboard)
+
+    private void buildSuggestionBar() {
+        sugBar = new LinearLayout(this);
+        sugBar.setOrientation(LinearLayout.HORIZONTAL);
+        sugBar.setGravity(Gravity.CENTER_VERTICAL);
+        sugBar.setVisibility(View.GONE);
+        TextView more = new TextView(this);
+        more.setText("⋯");
+        more.setTextSize(20);
+        more.setGravity(Gravity.CENTER);
+        more.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { forceToolbar = true; updateSuggestionVisibility(); }
+        });
+        sugBar.addView(more, new LinearLayout.LayoutParams((int) (40 * dp), ViewGroup.LayoutParams.MATCH_PARENT));
+        for (int i = 0; i < 3; i++) {
+            final int idx = i;
+            TextView t = new TextView(this);
+            t.setGravity(Gravity.CENTER);
+            t.setSingleLine(true);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            t.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { pickSuggestion(idx); }
+            });
+            t.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override public boolean onLongClick(View v) {
+                    if (sugWords[idx] == null) return false;
+                    dict.forget(sugWords[idx]);
+                    toast("Palavra esquecida: " + sugWords[idx]);
+                    updateSuggestions();
+                    return true;
+                }
+            });
+            sugViews[i] = t;
+            sugBar.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        }
+    }
+
+    private void styleSuggestions() {
+        if (sugBar == null) return;
+        sugBar.setBackgroundColor(theme.bar);
+        ((TextView) sugBar.getChildAt(0)).setTextColor(theme.textDim);
+        for (int i = 0; i < 3; i++) {
+            sugViews[i].setTextColor(i == 1 ? theme.text : theme.barText);
+            sugViews[i].setTextSize(theme.big ? 19 : 17);
+            sugViews[i].setTypeface(i == 1 ? android.graphics.Typeface.DEFAULT_BOLD : android.graphics.Typeface.DEFAULT);
+        }
+    }
+
+    private final Runnable suggestTask = new Runnable() {
+        @Override public void run() { computeSuggestions(); }
+    };
+
+    /** Junta várias teclas rápidas numa atualização só (não pesa nada). */
+    private void updateSuggestions() {
+        ui.removeCallbacks(suggestTask);
+        ui.postDelayed(suggestTask, 25);
+    }
+
+    private void computeSuggestions() {
+        curWord = "";
+        if (suggestOk && mode == MODE_KEYS && selStart == selEnd) {
+            InputConnection ic = getCurrentInputConnection();
+            CharSequence b = ic != null ? ic.getTextBeforeCursor(40, 0) : null;
+            if (b != null) {
+                int i = b.length();
+                while (i > 0 && Character.isLetter(b.charAt(i - 1))) i--;
+                curWord = b.subSequence(i, b.length()).toString();
+            }
+        }
+        for (int i = 0; i < 3; i++) sugWords[i] = null;
+        if (!curWord.isEmpty()) {
+            java.util.ArrayList<String> r = dict.suggest(curWord, 2);
+            // esquerda: o que você digitou | meio: melhor sugestão | direita: segunda
+            sugWords[0] = curWord;
+            if (r.size() > 0) sugWords[1] = r.get(0);
+            if (r.size() > 1) sugWords[2] = r.get(1);
+            String fix = correctOk ? dict.autoAccent(curWord) : null;
+            boolean unknown = !dict.known(curWord) && dict.isLoaded();
+            sugViews[0].setText(unknown ? "\u201C" + curWord + "\u201D" : curWord);
+            for (int i = 1; i < 3; i++) sugViews[i].setText(sugWords[i] == null ? "" : sugWords[i]);
+            // a correção automática aparece destacada no meio
+            sugViews[1].setTextColor(fix != null && fix.equals(sugWords[1]) ? theme.accent : theme.text);
+        }
+        updateSuggestionVisibility();
+    }
+
+    private void updateSuggestionVisibility() {
+        if (sugBar == null) return;
+        boolean showSug = suggestOk && !curWord.isEmpty() && !forceToolbar && mode == MODE_KEYS;
+        if (!prefs.showToolbar && suggestOk && mode == MODE_KEYS) showSug = true; // barra só de sugestões
+        sugBar.setVisibility(showSug ? View.VISIBLE : View.GONE);
+        toolbar.setVisibility(!showSug && prefs.showToolbar ? View.VISIBLE : View.INVISIBLE);
+        if (curWord.isEmpty()) {
+            forceToolbar = false;
+            if (showSug) for (TextView t : sugViews) t.setText("");
+        }
+    }
+
+    private void pickSuggestion(int idx) {
+        String w = sugWords[idx];
+        InputConnection ic = getCurrentInputConnection();
+        if (w == null || ic == null) return;
+        ic.beginBatchEdit();
+        ic.deleteSurroundingText(curWord.length(), 0);
+        ic.commitText(w + " ", 1);
+        ic.endBatchEdit();
+        dict.learn(w);
+        lastFixTyped = null;
+        lastSpaceTime = SystemClock.uptimeMillis();
     }
 
     // ClipPanel.Host
@@ -365,7 +561,9 @@ public final class LeveIME extends InputMethodService
         }
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
-        // pontuação logo após o espaço automático do ponto duplo: cola na palavra
+        boolean punct = text.length() == 1 && ".,!?;:".indexOf(text.charAt(0)) >= 0;
+        if (punct) { fixAndLearn(ic); lastFixTyped = null; }
+        else if (!Character.isLetter(text.charAt(0))) lastFixTyped = null;
         ic.commitText(text, 1);
         afterChar();
     }
@@ -401,6 +599,7 @@ public final class LeveIME extends InputMethodService
             case Layouts.SYM2: switchLayer(Layouts.SYMBOLS2); break;
             case Layouts.ABC: switchLayer(Layouts.LETTERS); break;
             case Layouts.GLOBE: nextKeyboard(); break;
+            case Layouts.EMOJI: setMode(MODE_EMOJI); break;
             default:
                 if (code > 0) onText(new String(Character.toChars(code)));
         }
@@ -430,6 +629,7 @@ public final class LeveIME extends InputMethodService
         switch (code) {
             case Layouts.SHIFT: shiftState = 2; keyboard.setShiftState(2); break;
             case Layouts.SPACE:
+            case Layouts.EMOJI:
             case Layouts.GLOBE: showPicker(); break;
             case Layouts.SYM:
             case Layouts.ABC:
@@ -448,6 +648,20 @@ public final class LeveIME extends InputMethodService
     private void deleteOne(InputConnection ic) {
         if (ic == null) return;
         if (selStart != selEnd && selStart >= 0) { ic.commitText("", 1); return; }
+        // ⌫ logo após uma correção automática: volta para o que você digitou (igual ao Gboard)
+        if (lastFixTyped != null) {
+            String fixed = lastFixWord + " ";
+            CharSequence before = ic.getTextBeforeCursor(fixed.length(), 0);
+            String typed = lastFixTyped;
+            lastFixTyped = null;
+            if (before != null && before.toString().equals(fixed)) {
+                ic.beginBatchEdit();
+                ic.deleteSurroundingText(fixed.length(), 0);
+                ic.commitText(typed, 1);
+                ic.endBatchEdit();
+                return;
+            }
+        }
         CharSequence b = ic.getTextBeforeCursor(2, 0);
         if (b == null || b.length() == 0) {
             key(KeyEvent.KEYCODE_DEL, 0);
@@ -514,8 +728,34 @@ public final class LeveIME extends InputMethodService
                 }
             }
         }
+        boolean fixed = fixAndLearn(ic);
         ic.commitText(" ", 1);
+        if (!fixed) lastFixTyped = null;
         lastSpaceTime = now;
+    }
+
+    /** Corrige o acento da palavra que acabou de ser digitada e ensina o dicionário. */
+    private boolean fixAndLearn(InputConnection ic) {
+        if (!suggestOk) return false;
+        CharSequence b = ic.getTextBeforeCursor(40, 0);
+        if (b == null) return false;
+        int i = b.length();
+        while (i > 0 && Character.isLetter(b.charAt(i - 1))) i--;
+        String word = b.subSequence(i, b.length()).toString();
+        if (word.isEmpty()) return false;
+        String fix = correctOk ? dict.autoAccent(word) : null;
+        if (fix != null) {
+            ic.beginBatchEdit();
+            ic.deleteSurroundingText(word.length(), 0);
+            ic.commitText(fix, 1);
+            ic.endBatchEdit();
+            lastFixTyped = word;
+            lastFixWord = fix;
+            dict.learn(fix);
+            return true;
+        }
+        dict.learn(word);
+        return false;
     }
 
     private void enter(InputConnection ic) {
@@ -525,6 +765,8 @@ public final class LeveIME extends InputMethodService
         boolean noAction = ei == null || (ei.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
                 || action == EditorInfo.IME_ACTION_NONE || action == EditorInfo.IME_ACTION_UNSPECIFIED
                 || (ei.inputType & InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0;
+        fixAndLearn(ic);
+        lastFixTyped = null;
         if (noAction) key(KeyEvent.KEYCODE_ENTER, 0);
         else ic.performEditorAction(action);
     }
@@ -564,6 +806,7 @@ public final class LeveIME extends InputMethodService
         selStart = newSelStart;
         selEnd = newSelEnd;
         if (newSelStart == newSelEnd) autoShift();
+        updateSuggestions();
     }
 
     private void autoShift() {

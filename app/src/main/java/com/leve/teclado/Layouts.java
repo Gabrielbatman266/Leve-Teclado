@@ -5,7 +5,7 @@ import java.util.List;
 
 /** Layouts das teclas (ABNT2 simplificado, com acentos no toque longo). */
 final class Layouts {
-    static final int SHIFT = -1, SYM = -2, SYM2 = -3, ENTER = -4, DEL = -5, ABC = -6, GLOBE = -7, NUM = -8;
+    static final int SHIFT = -1, SYM = -2, SYM2 = -3, ENTER = -4, DEL = -5, ABC = -6, GLOBE = -7, NUM = -8, EMOJI = -9;
     static final int SPACE = 32;
 
     static final int LETTERS = 0, SYMBOLS = 1, SYMBOLS2 = 2, NUMPAD = 3;
@@ -40,7 +40,7 @@ final class Layouts {
         List<Key> r = new ArrayList<>();
         r.add(s(switchLabel, switchCode, 1.4f));
         r.add(c(",", ",;:'\"…"));
-        r.add(s("🌐", GLOBE, 1f));
+        r.add(s("😊", EMOJI, 1f));
         r.add(s("espaço", SPACE, 4.0f));
         r.add(c(".", ".?!-_/@"));
         r.add(s("↵", ENTER, 1.6f));

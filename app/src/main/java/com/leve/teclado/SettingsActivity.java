@@ -94,6 +94,19 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
         toggle("Maiúscula automática no início da frase", "autoCap", true);
         toggle("Dois espaços = ponto final", "doubleSpace", true);
         toggle("Barra de ferramentas (copiar, colar, cursor…)", "showToolbar", true);
+
+        section("Sugestões");
+        toggle("Sugestões de palavras (igual Gboard)", "suggestions", true);
+        toggle("Corrigir acentos sozinho (nao → não, voce → você)", "autoCorrect", true);
+        content.addView(text("O teclado aprende as palavras que você usa. Segure uma sugestão para esquecê-la. " +
+                "Apertou ⌫ logo depois de uma correção? Ela é desfeita.", 14, DIM));
+        content.addView(button("Esquecer todas as palavras aprendidas", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                confirm("Apagar as palavras que o teclado aprendeu com você?", new Runnable() {
+                    @Override public void run() { Dictionary.get(SettingsActivity.this).clearLearned(); toast("Pronto"); }
+                });
+            }
+        }));
         slider("Altura das teclas", "keyHeightDp", 50, 36, 90, 1, "dp");
         slider("Tamanho das letras", "textScale", 100, 70, 180, 5, "%");
         slider("Tempo do toque longo", "longPressMs", 320, 150, 800, 10, "ms");
@@ -187,7 +200,9 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
                 "• Toque duplo no ⇧ = CAPS LOCK (ou segure)\n" +
                 "• Segure ↵ para pular linha mesmo onde Enter envia\n" +
                 "• Segure ?123 para abrir a área de transferência\n" +
-                "• Segure o espaço ou 🌐 para trocar de teclado (voz/emoji)\n" +
+                "• 😊 abre os emojis; segure o espaço ou 😊 para trocar de teclado (voz)\n" +
+                "• Toque numa sugestão para completar a palavra; ⋯ volta à barra de ferramentas\n" +
+                "• Tema Conforto: teclas grandes e espaçadas, visual limpo para dedos grandes\n" +
                 "• 📎 na barra cola o último copiado; segure para ver tudo\n" +
                 "• Copiar sem nada selecionado copia o campo inteiro\n" +
                 "• No histórico: toque cola, segure copia, ☆ salva, ✕ apaga\n" +

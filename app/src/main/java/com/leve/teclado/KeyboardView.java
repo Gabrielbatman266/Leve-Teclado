@@ -88,7 +88,12 @@ final class KeyboardView extends View {
 
     int computeHeight() {
         if (rows == null || prefs == null) return 0;
-        return (int) (rows.size() * prefs.keyHeightDp * dp + 8 * dp);
+        return (int) (rows.size() * keyHeightPx() + 8 * dp);
+    }
+
+    /** Altura da tecla: a da configuração, mas nunca menor que o mínimo do tema (Conforto). */
+    float keyHeightPx() {
+        return Math.max(prefs.keyHeightDp, theme.minKeyHeightDp) * dp;
     }
 
     @Override
@@ -103,7 +108,7 @@ final class KeyboardView extends View {
 
     private void layoutKeys(int width) {
         if (rows == null || width <= 0) return;
-        float kh = prefs.keyHeightDp * dp;
+        float kh = keyHeightPx();
         float top = 4 * dp;
         for (List<Layouts.Key> row : rows) {
             float total = 0;
@@ -124,8 +129,8 @@ final class KeyboardView extends View {
     protected void onDraw(Canvas canvas) {
         canvas.drawColor(theme.bg);
         if (rows == null) return;
-        float gap = 3 * dp, radius = 6 * dp;
-        float scale = prefs.textScale / 100f;
+        float gap = theme.gapDp * dp, radius = theme.radiusDp * dp;
+        float scale = prefs.textScale / 100f * theme.textMul;
         boolean upper = shiftState > 0;
         strokePaint.setColor(theme.textDim);
 
@@ -141,6 +146,8 @@ final class KeyboardView extends View {
                 int color = theme.text;
                 if (k.code == Layouts.SHIFT && shiftState > 0) color = theme.accent;
                 if (k.code == Layouts.ENTER) color = theme.accent;
+                if (theme.big && k.special && k.code != Layouts.ENTER && !(k.code == Layouts.SHIFT && shiftState > 0))
+                    color = theme.textDim;
                 if (pressed && theme.outlined()) color = 0xFF000000;
                 textPaint.setColor(color);
 
@@ -162,7 +169,7 @@ final class KeyboardView extends View {
                 float cy = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f;
                 canvas.drawText(label, rect.centerX(), cy, textPaint);
 
-                if (prefs.hints && k.alts != null && !k.special) {
+                if (prefs.hints && !theme.big && k.alts != null && !k.special) {
                     hintPaint.setColor(theme.textDim);
                     hintPaint.setTextSize(10 * dp * scale);
                     String h = k.alts.substring(0, Character.charCount(k.alts.codePointAt(0)));
@@ -198,7 +205,7 @@ final class KeyboardView extends View {
         strokePaint.setColor(theme.accent);
         canvas.drawRoundRect(rect, radius, radius, strokePaint);
         textPaint.setColor(theme.text);
-        textPaint.setTextSize(30 * dp * prefs.textScale / 100f);
+        textPaint.setTextSize(30 * dp * prefs.textScale / 100f * theme.textMul);
         float cy = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f;
         canvas.drawText(labelFor(k, upper), rect.centerX(), cy, textPaint);
     }
@@ -210,7 +217,7 @@ final class KeyboardView extends View {
         canvas.drawRoundRect(popupRect, radius, radius, keyPaint);
         strokePaint.setColor(theme.accent);
         canvas.drawRoundRect(popupRect, radius, radius, strokePaint);
-        textPaint.setTextSize(22 * dp * prefs.textScale / 100f);
+        textPaint.setTextSize(22 * dp * prefs.textScale / 100f * theme.textMul);
         int idx = 0;
         for (int i = 0; i < popupChars.length(); ) {
             int cp = popupChars.codePointAt(i);
