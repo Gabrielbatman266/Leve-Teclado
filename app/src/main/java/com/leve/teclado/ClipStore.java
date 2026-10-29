@@ -98,11 +98,37 @@ final class ClipStore {
 
     void togglePin(Item it) { it.pinned = !it.pinned; changed(); }
 
-    void remove(Item it) { items.remove(it); changed(); }
+    void remove(Item it) {
+        items.remove(it);
+        removed.put(it.text.hashCode(), it.text.length());
+        changed();
+    }
+
+    // textos apagados de propósito: não voltam só porque o Android ainda os tem copiados
+    private final java.util.HashMap<Integer, Integer> removed = new java.util.HashMap<>();
+    private int lastSeenHash, lastSeenLen = -1;
+
+    /** Captura do sistema: só entra se for uma cópia nova (não a mesma que já vimos ou que você apagou). */
+    void offerFromSystem(String text, boolean isNewCopy) {
+        if (text == null) return;
+        int h = text.hashCode(), len = text.length();
+        boolean same = h == lastSeenHash && len == lastSeenLen;
+        lastSeenHash = h; lastSeenLen = len;
+        if (!isNewCopy) {
+            if (same) return;
+            Integer r = removed.get(h);
+            if (r != null && r == len) return;
+        }
+        removed.remove(h);
+        add(text);
+    }
 
     /** Apaga o histórico, mas mantém os salvos. */
     void clearUnpinned() {
-        for (int i = items.size() - 1; i >= 0; i--) if (!items.get(i).pinned) items.remove(i);
+        for (int i = items.size() - 1; i >= 0; i--) if (!items.get(i).pinned) {
+            Item it = items.remove(i);
+            removed.put(it.text.hashCode(), it.text.length());
+        }
         changed();
     }
 

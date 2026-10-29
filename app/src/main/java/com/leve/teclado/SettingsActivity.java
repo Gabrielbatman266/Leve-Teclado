@@ -41,6 +41,10 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
     private LinearLayout content, shortcutList;
     private TextView status, clipCount;
     private float dp;
+    private Button updateBtn;
+    private String updateUrl;
+    private int updateVersion;
+    private boolean checking;
     private ClipStore store;
 
     @Override
@@ -64,7 +68,14 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
         TextView title = text("Leve Teclado", 28, TEXT);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         content.addView(title);
-        content.addView(text("Rápido, leve, com área de transferência gigante.", 14, DIM));
+        content.addView(text("Rápido, leve, com área de transferência gigante. Versão 1.0."
+                + Updater.currentVersion(this), 14, DIM));
+
+        // ---- atualização (igual aos outros apps Leve)
+        updateBtn = button("⟳  Procurar atualização", new View.OnClickListener() {
+            @Override public void onClick(View v) { onUpdateClick(); }
+        });
+        content.addView(updateBtn);
 
         // ---- ativação
         section("Ativar");
@@ -210,9 +221,49 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
                 "• Selecionar + ◀ ▶ ⇤ ⇥ seleciona texto com precisão", 14, TEXT));
     }
 
+    // ------------------------------------------------------------ atualização
+
+    private void checkUpdate(final boolean manual) {
+        if (checking) return;
+        checking = true;
+        updateBtn.setText("⟳  Procurando…");
+        Updater.check(this, new Updater.Callback() {
+            @Override public void onResult(int current, int latest, String url, String error) {
+                checking = false;
+                if (error != null) {
+                    updateBtn.setText("⟳  Procurar atualização");
+                    if (manual) toast(error);
+                } else if (latest > current) {
+                    updateUrl = url;
+                    updateVersion = latest;
+                    updateBtn.setText("⬇  Atualizar para 1.0." + latest + " (nova!)");
+                    updateBtn.setTextColor(0xFF000000);
+                    GradientDrawable g = new GradientDrawable();
+                    g.setColor(ACCENT);
+                    g.setCornerRadius(12 * dp);
+                    updateBtn.setBackground(g);
+                } else {
+                    updateBtn.setText("✓  Você já tem a versão mais nova (1.0." + current + ")");
+                }
+            }
+        });
+    }
+
+    private void onUpdateClick() {
+        if (updateUrl == null) { checkUpdate(true); return; }
+        if (!Updater.ensureInstallPermission(this)) {
+            toast("Libere \"instalar apps desconhecidos\" e toque em Atualizar de novo");
+            return;
+        }
+        Updater.download(this, updateUrl, updateVersion);
+        updateBtn.setText("⬇  Baixando… o instalador abre sozinho");
+        toast("Baixando a atualização");
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        if (updateUrl == null && !checking) checkUpdate(false);
         store.addListener(this);
         updateStatus();
         onClipsChanged();

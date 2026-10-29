@@ -25,6 +25,7 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
         void copyToSystem(String text);
         void startSearch();
         void closePanel();
+        void onClipDeleted(String text);
     }
 
     private final ClipStore store;
@@ -108,6 +109,7 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
                     confirmClear = false;
                     clear.setText("Limpar");
                     ClipPanel.this.store.clearUnpinned();
+                    ClipPanel.this.host.onClipDeleted(null);
                 }
             }
         });
@@ -250,8 +252,11 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
                 h.pin.setTextSize(20);
                 h.pin.setPadding(p + p / 2, p, p + p / 2, p);
                 h.del = new TextView(c);
-                h.del.setTextSize(18);
-                h.del.setPadding(p + p / 2, p, p, p);
+                h.del.setTextSize(20);
+                h.del.setGravity(Gravity.CENTER);
+                h.del.setMinWidth((int) (48 * dp));
+                h.del.setMinHeight((int) (48 * dp));
+                h.del.setPadding(p, p, p, p);
                 h.del.setText("✕");
                 row.addView(h.pin);
                 row.addView(h.del);
@@ -260,7 +265,12 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
                     @Override public void onClick(View v) { store.togglePin(((Holder) ((View) v.getParent()).getTag()).item); }
                 });
                 h.del.setOnClickListener(new OnClickListener() {
-                    @Override public void onClick(View v) { store.remove(((Holder) ((View) v.getParent()).getTag()).item); }
+                    @Override public void onClick(View v) {
+                        ClipStore.Item it = ((Holder) ((View) v.getParent()).getTag()).item;
+                        if (it == null) return;
+                        store.remove(it);
+                        host.onClipDeleted(it.text);
+                    }
                 });
                 row.setTag(h);
                 convert = row;

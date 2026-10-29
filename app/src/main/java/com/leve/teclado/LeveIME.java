@@ -482,22 +482,41 @@ public final class LeveIME extends InputMethodService
 
     @Override public void startSearch() { setMode(MODE_SEARCH); }
 
+    /** Apagou do histórico: se for o que está copiado no Android, limpa lá também (null = limpou tudo). */
+    @Override public void onClipDeleted(String text) {
+        if (clipboard == null) return;
+        try {
+            ClipData clip = clipboard.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return;
+            CharSequence cur = clip.getItemAt(0).coerceToText(this);
+            if (cur == null) return;
+            if (text != null && !cur.toString().equals(text)) return;
+            if (text == null) {
+                for (ClipStore.Item it : store.items) if (it.text.equals(cur.toString())) return; // é um salvo ★
+            }
+            if (Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip();
+            else clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
+        } catch (Exception ignored) { }
+    }
+
     @Override public void closePanel() { setMode(MODE_KEYS); }
 
     // ------------------------------------------------------------ área de transferência
 
     @Override
     public void onPrimaryClipChanged() {
-        captureCurrentClip();
+        captureClip(true);
     }
 
-    private void captureCurrentClip() {
+    private void captureCurrentClip() { captureClip(false); }
+
+    private void captureClip(boolean isNewCopy) {
         if (clipboard == null || prefs.pauseHistory) return;
         try {
             ClipData clip = clipboard.getPrimaryClip();
             if (clip == null || clip.getItemCount() == 0) return;
             CharSequence t = clip.getItemAt(0).coerceToText(this);
-            if (t != null && !(passwordField && isInputViewShown())) store.add(t.toString());
+            if (t != null && !(passwordField && isInputViewShown())) store.offerFromSystem(t.toString(), isNewCopy);
         } catch (Exception ignored) { } // alguns sistemas bloqueiam leitura em segundo plano
     }
 
