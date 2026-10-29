@@ -24,7 +24,18 @@ jobs:
           gradle-version: '8.9'
 
       - name: Compilar APK
-        run: echo "sdk.dir=$ANDROID_HOME" > local.properties && gradle assembleRelease --no-daemon --stacktrace
+        shell: bash
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          set -o pipefail
+          gradle assembleRelease --no-daemon 2>&1 | tee build.log
+
+      - name: Mostrar erros
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "error:|e: |What went wrong|Could not|> " build.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+          sed -n '/What went wrong/,/Try:/p' build.log | head -30 | while IFS= read -r l; do echo "::error::$l"; done
 
       - name: Renomear
         run: cp app/build/outputs/apk/release/app-release.apk Leve-Teclado.apk
