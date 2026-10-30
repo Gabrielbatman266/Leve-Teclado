@@ -79,7 +79,9 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
         list = new ListView(c);
         list.setAdapter(adapter);
         list.setDividerHeight((int) dp);
-        list.setFastScrollEnabled(true);
+        // sem barrinha de rolagem rápida: ela ficava em cima do ✕ e roubava o toque
+        list.setFastScrollEnabled(false);
+        list.setVerticalScrollBarEnabled(false);
         addView(list, new LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f));
 
         tabHistory.setOnClickListener(new OnClickListener() {
@@ -233,7 +235,7 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
                 row.setOrientation(HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 int p = (int) (8 * dp);
-                row.setPadding(p + p / 2, p, p / 2, p);
+                row.setPadding(p + p / 2, p, p + p / 2, p); // margem à direita, longe da borda
 
                 LinearLayout col = new LinearLayout(c);
                 col.setOrientation(VERTICAL);
