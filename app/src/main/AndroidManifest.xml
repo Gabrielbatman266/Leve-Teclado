@@ -23,6 +23,13 @@
             <meta-data android:name="android.view.im" android:resource="@xml/method" />
         </service>
 
+        <!-- entrega as imagens guardadas ao app onde você cola (só leitura, permissão na hora) -->
+        <provider
+            android:name=".ClipImageProvider"
+            android:authorities="com.leve.teclado.clipimg"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <activity
             android:name=".SettingsActivity"
             android:label="Leve Teclado"

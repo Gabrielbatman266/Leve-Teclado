@@ -144,7 +144,9 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
         content.addView(clipCount);
         slider("Guardar no histórico", "historyMax", 1000, 100, 10000, 100, " itens");
         toggle("Voltar ao teclado depois de colar", "backAfterPaste", true);
+        toggle("Guardar imagens copiadas", "saveImages", true);
         toggle("Pausar histórico (não guardar nada)", "pauseHistory", false);
+        content.addView(text("O backup leva só os textos; as imagens ficam no celular.", 13, DIM));
         content.addView(button("Exportar backup (.json)", new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
@@ -217,6 +219,8 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
                 "• 📎 na barra cola o último copiado; segure para ver tudo\n" +
                 "• Copiar sem nada selecionado copia o campo inteiro\n" +
                 "• No histórico: toque cola, segure copia, ☆ salva, ✕ apaga\n" +
+                "• Abas: Tudo, Textos, Links, Imagens e Salvos; Limpar apaga só a aba aberta\n" +
+                "• Imagens copiadas ficam guardadas; toque para colar (WhatsApp, Telegram…)\n" +
                 "• 🔎 busca no histórico digitando no próprio teclado\n" +
                 "• Selecionar + ◀ ▶ ⇤ ⇥ seleciona texto com precisão", 14, TEXT));
     }
@@ -285,7 +289,8 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
     public void onClipsChanged() {
         int pinned = 0;
         for (ClipStore.Item it : store.items) if (it.pinned) pinned++;
-        clipCount.setText(store.items.size() + " itens guardados · " + pinned + " salvos ★");
+        int imgs = store.countImages();
+        clipCount.setText(store.items.size() + " itens guardados · " + imgs + " imagens · " + pinned + " salvos ★");
     }
 
     private void updateStatus() {

@@ -8,6 +8,8 @@ Vá em **Releases** → baixe `Leve-Teclado.apk` → instale → abra o app → 
 ## O que tem
 **Área de transferência turbinada**
 - Histórico de até 10.000 itens (padrão 1.000), salvo mesmo reiniciando o celular
+- 🖼 Imagens copiadas também ficam guardadas e colam com 1 toque
+- Abas: Tudo · Textos · Links · Imagens · ★ Salvos
 - ★ Salvar textos fixos (não somem ao limpar)
 - 🔎 Busca no histórico digitando no próprio teclado
 - 📎 Chip com o último copiado: 1 toque cola

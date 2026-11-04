@@ -468,35 +468,97 @@ public final class LeveIME extends InputMethodService
     }
 
     // ClipPanel.Host
-    @Override public void pasteClip(String text) {
+    @Override public void pasteItem(ClipStore.Item it) {
         InputConnection ic = getCurrentInputConnection();
-        if (ic != null) ic.commitText(text, 1);
+        if (ic == null) return;
+        if (it.isImage()) {
+            if (!pasteImage(ic, it)) return;
+        } else {
+            ic.commitText(it.text, 1);
+        }
         if (prefs.backAfterPaste) setMode(MODE_KEYS);
     }
 
-    @Override public void copyToSystem(String text) {
+    /**
+     * Cola imagem: 1º jeito oficial (o app diz que aceita imagens, ex.: WhatsApp, Telegram, Gmail);
+     * se o app não aceitar, põe na área de transferência do Android e manda "colar".
+     */
+    private boolean pasteImage(InputConnection ic, ClipStore.Item it) {
+        android.net.Uri uri = ClipImageProvider.uriFor(it.img);
+        String mime = ClipImageProvider.mimeOf(it.img);
+        EditorInfo ei = getCurrentInputEditorInfo();
+        if (Build.VERSION.SDK_INT >= 25 && ei != null && ei.contentMimeTypes != null) {
+            for (String accepted : ei.contentMimeTypes) {
+                if (android.content.ClipDescription.compareMimeTypes(mime, accepted)) {
+                    android.view.inputmethod.InputContentInfo info = new android.view.inputmethod.InputContentInfo(
+                            uri, new android.content.ClipDescription("Imagem", new String[]{mime}), null);
+                    try {
+                        if (ic.commitContent(info, InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null))
+                            return true;
+                    } catch (Exception ignored) { }
+                    break;
+                }
+            }
+        }
+        if (!putImageOnClipboard(it)) { toast("Não deu para colar a imagem aqui"); return false; }
+        ic.performContextMenuAction(android.R.id.paste);
+        toast("Imagem copiada. Se não colou, segure no campo e toque em Colar");
+        return true;
+    }
+
+    private boolean putImageOnClipboard(ClipStore.Item it) {
+        if (clipboard == null) return false;
+        try {
+            clipboard.setPrimaryClip(ClipData.newUri(getContentResolver(), "Imagem",
+                    ClipImageProvider.uriFor(it.img)));
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @Override public void copyToSystem(ClipStore.Item it) {
         if (clipboard == null) return;
-        clipboard.setPrimaryClip(ClipData.newPlainText("Leve Teclado", text));
+        if (it.isImage()) {
+            if (putImageOnClipboard(it)) toast("Imagem copiada");
+            return;
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("Leve Teclado", it.text));
         toast("Copiado");
     }
 
     @Override public void startSearch() { setMode(MODE_SEARCH); }
 
     /** Apagou do histórico: se for o que está copiado no Android, limpa lá também (null = limpou tudo). */
-    @Override public void onClipDeleted(String text) {
+    @Override public void onClipDeleted(ClipStore.Item item) {
         if (clipboard == null) return;
+        if (item != null && item.isImage()) {
+            // só limpa se a imagem copiada no Android for exatamente a nossa cópia
+            try {
+                ClipData clip = clipboard.getPrimaryClip();
+                android.net.Uri u = clip != null && clip.getItemCount() > 0 ? clip.getItemAt(0).getUri() : null;
+                if (u != null && u.equals(ClipImageProvider.uriFor(item.img))) clearSystemClip();
+            } catch (Exception ignored) { }
+            return;
+        }
+        String text = item == null ? null : item.text;
         try {
             ClipData clip = clipboard.getPrimaryClip();
             if (clip == null || clip.getItemCount() == 0) return;
+            if (clip.getItemAt(0).getUri() != null && text == null) return; // imagem: não mexe
             CharSequence cur = clip.getItemAt(0).coerceToText(this);
             if (cur == null) return;
             if (text != null && !cur.toString().equals(text)) return;
             if (text == null) {
                 for (ClipStore.Item it : store.items) if (it.text.equals(cur.toString())) return; // é um salvo ★
             }
-            if (Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip();
-            else clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
+            clearSystemClip();
         } catch (Exception ignored) { }
+    }
+
+    private void clearSystemClip() {
+        if (Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip();
+        else clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
     }
 
     @Override public void closePanel() { setMode(MODE_KEYS); }
@@ -515,9 +577,28 @@ public final class LeveIME extends InputMethodService
         try {
             ClipData clip = clipboard.getPrimaryClip();
             if (clip == null || clip.getItemCount() == 0) return;
-            CharSequence t = clip.getItemAt(0).coerceToText(this);
+            ClipData.Item first = clip.getItemAt(0);
+            android.net.Uri uri = first.getUri();
+            if (uri != null && isImage(clip, uri)) {
+                // a cópia que nós mesmos colocamos: não duplica
+                if (ClipImageProvider.AUTHORITY.equals(uri.getAuthority())) return;
+                if (prefs.saveImages) store.offerImage(getContentResolver(), uri, isNewCopy);
+                return;
+            }
+            CharSequence t = first.coerceToText(this);
             if (t != null && !(passwordField && isInputViewShown())) store.offerFromSystem(t.toString(), isNewCopy);
         } catch (Exception ignored) { } // alguns sistemas bloqueiam leitura em segundo plano
+    }
+
+    private boolean isImage(ClipData clip, android.net.Uri uri) {
+        android.content.ClipDescription d = clip.getDescription();
+        if (d != null && d.hasMimeType("image/*")) return true;
+        try {
+            String t = getContentResolver().getType(uri);
+            return t != null && t.startsWith("image/");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @Override public void onClipsChanged() { refreshLatestChip(); }
@@ -529,6 +610,14 @@ public final class LeveIME extends InputMethodService
         try {
             ClipData clip = clipboard != null ? clipboard.getPrimaryClip() : null;
             if (clip != null && clip.getItemCount() > 0) {
+                android.net.Uri u = clip.getItemAt(0).getUri();
+                if (u != null && isImage(clip, u)) {
+                    // imagem copiada agora: usa o nosso jeito de colar imagem
+                    ClipStore.Item last = store.latestItem();
+                    if (last != null && last.isImage()) pasteImage(ic, last);
+                    else ic.performContextMenuAction(android.R.id.paste);
+                    return;
+                }
                 CharSequence t = clip.getItemAt(0).coerceToText(this);
                 if (t != null) text = t.toString();
             }
