@@ -37,6 +37,7 @@ final class ClipStore {
         String text;      // vazio nas imagens
         String img;       // nome do arquivo da imagem (null = texto)
         int w, h;
+        boolean shot;     // print de tela (veio da galeria, não da área de transferência)
         long time;
         boolean pinned;
         private Boolean link;
@@ -216,6 +217,24 @@ final class ClipStore {
         });
     }
 
+    /** Print de tela novo: entra direto na aba Imagens (sem mexer no controle da área de transferência). */
+    void offerScreenshot(final ContentResolver cr, final Uri uri) {
+        if (removedUris.contains(uri.toString())) return;
+        io.execute(new Runnable() {
+            @Override public void run() {
+                final Item it = copyImage(cr, uri);
+                if (it == null) return;
+                it.shot = true;
+                main.post(new Runnable() {
+                    @Override public void run() {
+                        uriToImg.put(uri.toString(), it.img);
+                        addImageItem(it);
+                    }
+                });
+            }
+        });
+    }
+
     private void addImageItem(Item n) {
         if (!loaded) return;
         boolean pinned = false;
@@ -223,7 +242,9 @@ final class ClipStore {
             Item it = items.get(i);
             if (n.img.equals(it.img)) {
                 if (i == 0) return;
-                pinned = items.remove(i).pinned;
+                Item old = items.remove(i);
+                pinned = old.pinned;
+                n.shot = n.shot || old.shot;
                 break;
             }
         }
@@ -366,7 +387,7 @@ final class ClipStore {
                 o.put("t", it.text);
                 o.put("d", it.time);
                 if (it.pinned) o.put("p", true);
-                if (it.isImage()) { o.put("i", it.img); o.put("w", it.w); o.put("h", it.h); }
+                if (it.isImage()) { o.put("i", it.img); o.put("w", it.w); o.put("h", it.h); if (it.shot) o.put("s", true); }
                 a.put(o);
             }
         } catch (Exception ignored) { }
@@ -385,6 +406,7 @@ final class ClipStore {
                     it.img = img;
                     it.w = o.optInt("w");
                     it.h = o.optInt("h");
+                    it.shot = o.optBoolean("s", false);
                 } else if (it.text.isEmpty()) {
                     continue;
                 }

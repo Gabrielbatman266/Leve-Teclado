@@ -51,6 +51,7 @@ public final class LeveIME extends InputMethodService
     private final TextView[] sugViews = new TextView[3];
     private final String[] sugWords = new String[3];
     private Dictionary dict;
+    private ScreenshotWatcher shots;
     private String curWord = "";
     private boolean suggestOk, correctOk, forceToolbar;
     private String lastFixTyped, lastFixWord; // para desfazer a correção com ⌫
@@ -75,6 +76,8 @@ public final class LeveIME extends InputMethodService
         store.max = prefs.historyMax;
         store.addListener(this);
         dict = Dictionary.get(this);
+        shots = new ScreenshotWatcher(this, store);
+        shots.refresh(prefs.saveShots && !prefs.pauseHistory);
         clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard != null) clipboard.addPrimaryClipChangedListener(this);
         ui.postDelayed(new Runnable() { @Override public void run() { purgeExpired(); } }, 3000);
@@ -84,6 +87,7 @@ public final class LeveIME extends InputMethodService
     public void onDestroy() {
         if (clipboard != null) clipboard.removePrimaryClipChangedListener(this);
         store.removeListener(this);
+        if (shots != null) shots.stop();
         super.onDestroy();
     }
 
@@ -234,6 +238,7 @@ public final class LeveIME extends InputMethodService
         updateEnterLabel(info);
         autoShift();
         captureCurrentClip();
+        shots.refresh(prefs.saveShots && !prefs.pauseHistory);
         updateSuggestions();
     }
 

@@ -13,7 +13,7 @@ import java.util.Map;
 final class Prefs {
     static final String FILE = "leve";
 
-    boolean feedPostLeve, feedInsta, numberRow, haptic, preview, hints, autoCap, doubleSpace, backAfterPaste, pauseHistory, showToolbar, suggestions, autoCorrect, saveImages;
+    boolean feedPostLeve, feedInsta, numberRow, haptic, preview, hints, autoCap, doubleSpace, backAfterPaste, pauseHistory, showToolbar, suggestions, autoCorrect, saveImages, saveShots;
     int postLeveTtl, keyHeightDp, textScale, longPressMs, historyMax, theme;
     final Map<String, String> shortcuts = new LinkedHashMap<>();
 
@@ -39,6 +39,7 @@ final class Prefs {
         p.suggestions = s.getBoolean("suggestions", true);
         p.autoCorrect = s.getBoolean("autoCorrect", true);
         p.saveImages = s.getBoolean("saveImages", true);
+        p.saveShots = s.getBoolean("saveShots", true);
         p.keyHeightDp = s.getInt("keyHeightDp", 50);
         p.textScale = s.getInt("textScale", 100);
         p.longPressMs = s.getInt("longPressMs", 320);

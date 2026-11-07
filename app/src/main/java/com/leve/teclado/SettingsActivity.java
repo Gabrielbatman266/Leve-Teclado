@@ -41,6 +41,9 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
     private LinearLayout content, shortcutList;
     private TextView status, clipCount;
     private float dp;
+    private TextView shotStatus;
+    private Button shotBtn;
+    private static final int REQ_SHOTS = 3;
     private Button updateBtn;
     private String updateUrl;
     private int updateVersion;
@@ -145,6 +148,16 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
         slider("Guardar no histórico", "historyMax", 1000, 100, 10000, 100, " itens");
         toggle("Voltar ao teclado depois de colar", "backAfterPaste", true);
         toggle("Guardar imagens copiadas", "saveImages", true);
+        toggle("Prints de tela entram na aba Imagens", "saveShots", true);
+        shotStatus = text("", 14, DIM);
+        content.addView(shotStatus);
+        shotBtn = button("📸 Permitir acesso aos prints", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (android.os.Build.VERSION.SDK_INT >= 23)
+                    requestPermissions(new String[]{ScreenshotWatcher.permission()}, REQ_SHOTS);
+            }
+        });
+        content.addView(shotBtn);
         toggle("Pausar histórico (não guardar nada)", "pauseHistory", false);
 
         section("Post Leve");
@@ -227,7 +240,7 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
                 "• Copiar sem nada selecionado copia o campo inteiro\n" +
                 "• No histórico: toque cola, segure copia, ☆ salva, ✕ apaga\n" +
                 "• Abas: Tudo, Textos, Links, Imagens e Salvos; Limpar apaga só a aba aberta\n" +
-                "• Imagens copiadas ficam guardadas; toque para colar (WhatsApp, Telegram…)\n" +
+                "• Imagens copiadas e prints de tela ficam guardados; toque para colar (WhatsApp, Telegram…)\n" +
                 "• 🔎 busca no histórico digitando no próprio teclado\n" +
                 "• Selecionar + ◀ ▶ ⇤ ⇥ seleciona texto com precisão", 14, TEXT));
     }
@@ -277,6 +290,7 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
         if (updateUrl == null && !checking) checkUpdate(false);
         store.addListener(this);
         updateStatus();
+        updateShotStatus();
         onClipsChanged();
     }
 
@@ -298,6 +312,30 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
         for (ClipStore.Item it : store.items) if (it.pinned) pinned++;
         int imgs = store.countImages();
         clipCount.setText(store.items.size() + " itens guardados · " + imgs + " imagens · " + pinned + " salvos ★");
+    }
+
+    private void updateShotStatus() {
+        boolean ok = ScreenshotWatcher.hasPermission(this);
+        shotBtn.setVisibility(ok ? View.GONE : View.VISIBLE);
+        shotStatus.setText(ok ? "✓ Prints liberados: cada print novo aparece em 🖼 Imagens."
+                : "Para os prints aparecerem, o teclado precisa ver suas fotos. Escolha \"Permitir tudo\" " +
+                  "(se escolher só algumas fotos, os prints novos não aparecem). Ele só olha os prints, nada sai do celular.");
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int req, String[] perms, int[] res) {
+        super.onRequestPermissionsResult(req, perms, res);
+        if (req != REQ_SHOTS) return;
+        updateShotStatus();
+        if (!ScreenshotWatcher.hasPermission(this) && android.os.Build.VERSION.SDK_INT >= 23
+                && !shouldShowRequestPermissionRationale(ScreenshotWatcher.permission())) {
+            // negou de vez: abre a tela do app para liberar manualmente
+            try {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + getPackageName())));
+                toast("Toque em Permissões → Fotos e vídeos → Permitir tudo");
+            } catch (Exception ignored) { }
+        }
     }
 
     private void updateStatus() {

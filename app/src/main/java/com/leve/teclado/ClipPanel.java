@@ -253,7 +253,7 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
             if (!store.isLoaded()) empty.setText("Carregando…");
             else if (!q.isEmpty()) empty.setText("Nada encontrado para \"" + query + "\"");
             else if (tab == TAB_SAVED) empty.setText("Nada salvo ainda.\nToque na ☆ de um item para salvar.");
-            else if (tab == TAB_IMAGE) empty.setText("Nenhuma imagem copiada.\nCopie uma imagem em qualquer app e ela aparece aqui.");
+            else if (tab == TAB_IMAGE) empty.setText("Nenhuma imagem ainda.\nCopie uma imagem ou tire um print e ela aparece aqui.");
             else if (tab == TAB_LINK) empty.setText("Nenhum link copiado ainda.");
             else empty.setText("Nada copiado ainda.\nTudo que você copiar aparece aqui.");
         } else {
@@ -400,7 +400,7 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
                 h.thumb.setBackground(g);
                 h.thumb.setVisibility(VISIBLE);
                 loadThumb(h.thumb, it.img, size);
-                h.text.setText("Imagem");
+                h.text.setText(it.shot ? "📸 Print de tela" : "Imagem");
                 h.meta.setText(when + (it.w > 0 ? " · " + it.w + "×" + it.h : ""));
             } else {
                 h.thumb.setVisibility(GONE);
