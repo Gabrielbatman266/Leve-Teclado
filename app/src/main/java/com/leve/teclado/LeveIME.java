@@ -77,6 +77,7 @@ public final class LeveIME extends InputMethodService
         dict = Dictionary.get(this);
         clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard != null) clipboard.addPrimaryClipChangedListener(this);
+        ui.postDelayed(new Runnable() { @Override public void run() { purgeExpired(); } }, 3000);
     }
 
     @Override
@@ -128,6 +129,74 @@ public final class LeveIME extends InputMethodService
 
         applyPrefs();
         return root;
+    }
+
+    // ------------------------------------------------------------ sinergia com o Post Leve
+    static final String POST_LEVE = "com.leve.analise";
+    static final String THREADS = "com.instagram.barcelona", INSTAGRAM = "com.instagram.android";
+    private String lastPkg = "";
+    private long lastPkgAt;
+
+    @Override
+    public void onStartInput(EditorInfo attr, boolean restarting) {
+        super.onStartInput(attr, restarting);
+        if (attr != null && attr.packageName != null && !attr.packageName.equals(getPackageName())) {
+            lastPkg = attr.packageName; lastPkgAt = System.currentTimeMillis();
+        }
+    }
+
+    /** No Threads (e no Instagram, se ligado): o que você copia vira referência no Post Leve. */
+    private boolean feedingNow() {
+        if (prefs == null || !prefs.feedPostLeve) return false;
+        if (System.currentTimeMillis() - lastPkgAt > 45 * 60 * 1000L) return false;
+        return THREADS.equals(lastPkg) || (prefs.feedInsta && INSTAGRAM.equals(lastPkg));
+    }
+
+    private void feedPostLeve(String t) {
+        String s = t.trim();
+        if (s.length() < 3 || s.length() > 2200) return;
+        if (s.matches("(?s)^\\S+://\\S+$") || s.matches("^@?[\\w.]+$")) return; // link ou só um @usuário
+        try {
+            Intent i = new Intent("com.leve.analise.ADD_TEXT").setPackage(POST_LEVE)
+                    .putExtra("texto", s).putExtra("app", lastPkg);
+            sendBroadcast(i);
+            toast("📥 Mandado pro Post Leve");
+        } catch (Exception ignored) { }
+    }
+
+    /** Legendas que o Post Leve copiou: ficam no histórico só por um tempo e somem sozinhas. */
+    private void expireLater(final String t) {
+        int min = prefs == null ? 10 : prefs.postLeveTtl;
+        if (min <= 0) return;
+        long at = System.currentTimeMillis() + min * 60_000L;
+        try {
+            org.json.JSONArray a = new org.json.JSONArray(Prefs.sp(this).getString("plExpire", "[]"));
+            a.put(new org.json.JSONObject().put("t", t).put("at", at));
+            Prefs.sp(this).edit().putString("plExpire", a.toString()).apply();
+        } catch (Exception ignored) { }
+        ui.postDelayed(new Runnable() { @Override public void run() { purgeExpired(); } }, min * 60_000L + 1000);
+    }
+
+    private void purgeExpired() {
+        try {
+            org.json.JSONArray a = new org.json.JSONArray(Prefs.sp(this).getString("plExpire", "[]"));
+            org.json.JSONArray keep = new org.json.JSONArray();
+            long now = System.currentTimeMillis();
+            boolean clearSys = false;
+            for (int i = 0; i < a.length(); i++) {
+                org.json.JSONObject o = a.getJSONObject(i);
+                if (o.optLong("at") > now) { keep.put(o); continue; }
+                String t = o.optString("t");
+                store.removeText(t);
+                try {
+                    ClipData c = clipboard.getPrimaryClip();
+                    CharSequence cur = c == null || c.getItemCount() == 0 ? null : c.getItemAt(0).coerceToText(this);
+                    if (cur != null && cur.toString().equals(t)) clearSys = true;
+                } catch (Exception ignored) { }
+            }
+            Prefs.sp(this).edit().putString("plExpire", keep.toString()).apply();
+            if (clearSys) clearSystemClip();
+        } catch (Exception ignored) { }
     }
 
     @Override
@@ -586,7 +655,14 @@ public final class LeveIME extends InputMethodService
                 return;
             }
             CharSequence t = first.coerceToText(this);
-            if (t != null && !(passwordField && isInputViewShown())) store.offerFromSystem(t.toString(), isNewCopy);
+            CharSequence label = clip.getDescription() == null ? null : clip.getDescription().getLabel();
+            boolean fromPostLeve = label != null && "PostLeve".contentEquals(label);
+            if (t != null && !(passwordField && isInputViewShown())) {
+                store.offerFromSystem(t.toString(), isNewCopy);
+                if (fromPostLeve && isNewCopy) expireLater(t.toString());
+                else if (isNewCopy && feedingNow()) feedPostLeve(t.toString());
+            }
+            if (isNewCopy) purgeExpired();
         } catch (Exception ignored) { } // alguns sistemas bloqueiam leitura em segundo plano
     }
 

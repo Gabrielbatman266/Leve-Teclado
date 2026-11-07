@@ -147,6 +147,13 @@ final class ClipStore {
 
     void togglePin(Item it) { it.pinned = !it.pinned; changed(); }
 
+    /** Tira do histórico um texto (não mexe nos salvos ★). */
+    boolean removeText(String t) {
+        if (t == null || !loaded) return false;
+        for (Item it : new ArrayList<>(items)) if (!it.isImage() && !it.pinned && it.text.equals(t)) { remove(it); return true; }
+        return false;
+    }
+
     void remove(Item it) {
         items.remove(it);
         forget(it);

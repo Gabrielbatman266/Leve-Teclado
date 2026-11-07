@@ -13,8 +13,8 @@ import java.util.Map;
 final class Prefs {
     static final String FILE = "leve";
 
-    boolean numberRow, haptic, preview, hints, autoCap, doubleSpace, backAfterPaste, pauseHistory, showToolbar, suggestions, autoCorrect, saveImages;
-    int keyHeightDp, textScale, longPressMs, historyMax, theme;
+    boolean feedPostLeve, feedInsta, numberRow, haptic, preview, hints, autoCap, doubleSpace, backAfterPaste, pauseHistory, showToolbar, suggestions, autoCorrect, saveImages;
+    int postLeveTtl, keyHeightDp, textScale, longPressMs, historyMax, theme;
     final Map<String, String> shortcuts = new LinkedHashMap<>();
 
     static SharedPreferences sp(Context c) {
@@ -24,6 +24,9 @@ final class Prefs {
     static Prefs load(Context c) {
         SharedPreferences s = sp(c);
         Prefs p = new Prefs();
+        p.feedPostLeve = s.getBoolean("feedPostLeve", true);
+        p.feedInsta = s.getBoolean("feedInsta", false);
+        p.postLeveTtl = s.getInt("postLeveTtl", 10);
         p.numberRow = s.getBoolean("numberRow", true);
         p.haptic = s.getBoolean("haptic", true);
         p.preview = s.getBoolean("preview", true);

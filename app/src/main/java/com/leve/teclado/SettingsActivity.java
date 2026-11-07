@@ -146,6 +146,13 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
         toggle("Voltar ao teclado depois de colar", "backAfterPaste", true);
         toggle("Guardar imagens copiadas", "saveImages", true);
         toggle("Pausar histórico (não guardar nada)", "pauseHistory", false);
+
+        section("Post Leve");
+        content.addView(text("No Threads, todo texto que você copia (legendas de outros perfis, frases boas) vai sozinho pro banco de legendas do Post Leve. " +
+                "E as legendas que o Post Leve copia pra você postar somem do histórico e da área de transferência depois de um tempo.", 13, DIM));
+        toggle("Mandar textos copiados no Threads pro Post Leve", "feedPostLeve", true);
+        toggle("Também no Instagram", "feedInsta", false);
+        slider("Apagar legendas do Post Leve depois de", "postLeveTtl", 10, 1, 60, 1, " min");
         content.addView(text("O backup leva só os textos; as imagens ficam no celular.", 13, DIM));
         content.addView(button("Exportar backup (.json)", new View.OnClickListener() {
             @Override public void onClick(View v) {

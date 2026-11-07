@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- pra mandar textos copiados no Threads pro Post Leve -->
+    <queries>
+        <package android:name="com.leve.analise" />
+    </queries>
+
     <application
         android:label="Leve Teclado"
         android:icon="@drawable/ic_launcher"
