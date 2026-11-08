@@ -158,6 +158,21 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
             }
         });
         content.addView(shotBtn);
+        content.addView(button("🔍 Buscar prints agora (últimas 24 h)", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (!ScreenshotWatcher.hasPermission(SettingsActivity.this)) {
+                    toast("Primeiro libere o acesso aos prints");
+                    return;
+                }
+                new ScreenshotWatcher(SettingsActivity.this, store).scanNow(new ScreenshotWatcher.Result() {
+                    @Override public void onDone(int n) {
+                        toast(n == 0 ? "Nenhum print novo nas últimas 24 h"
+                                : n + (n == 1 ? " print adicionado" : " prints adicionados") + " na aba Imagens");
+                        updateShotStatus();
+                    }
+                });
+            }
+        }));
         toggle("Pausar histórico (não guardar nada)", "pauseHistory", false);
 
         section("Post Leve");
@@ -285,8 +300,19 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
     }
 
     @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        setIntent(i);
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        if (getIntent().getBooleanExtra("askShots", false)) {
+            getIntent().removeExtra("askShots");
+            if (!ScreenshotWatcher.hasPermission(this) && android.os.Build.VERSION.SDK_INT >= 23)
+                requestPermissions(new String[]{ScreenshotWatcher.permission()}, REQ_SHOTS);
+        }
         if (updateUrl == null && !checking) checkUpdate(false);
         store.addListener(this);
         updateStatus();
@@ -315,9 +341,19 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
     }
 
     private void updateShotStatus() {
-        boolean ok = ScreenshotWatcher.hasPermission(this);
+ boolean ok = ScreenshotWatcher.hasPermission(this);
         shotBtn.setVisibility(ok ? View.GONE : View.VISIBLE);
-        shotStatus.setText(ok ? "✓ Prints liberados: cada print novo aparece em 🖼 Imagens."
+        long at = sp.getLong("shotFoundAt", 0);
+        String last = at > 0 ? " Último print guardado: "
+                + android.text.format.DateUtils.getRelativeTimeSpanString(at) + "." : "";
+        if (ScreenshotWatcher.partialOnly(this)) {
+            shotStatus.setText("⚠ Você liberou só algumas fotos, então os prints novos não aparecem. "
+                    + "Toque no botão abaixo e escolha \"Permitir tudo\".");
+            shotStatus.setTextColor(0xFFFFC857);
+            return;
+        }
+        shotStatus.setTextColor(ok ? ACCENT : 0xFFFF6B6B);
+        shotStatus.setText(ok ? "✓ Prints liberados: cada print novo aparece em 🖼 Imagens." + last
                 : "Para os prints aparecerem, o teclado precisa ver suas fotos. Escolha \"Permitir tudo\" " +
                   "(se escolher só algumas fotos, os prints novos não aparecem). Ele só olha os prints, nada sai do celular.");
     }
@@ -327,6 +363,16 @@ public final class SettingsActivity extends Activity implements ClipStore.Listen
         super.onRequestPermissionsResult(req, perms, res);
         if (req != REQ_SHOTS) return;
         updateShotStatus();
+        if (ScreenshotWatcher.hasPermission(this)) {
+            // já pega os prints recentes na hora
+            new ScreenshotWatcher(this, store).scanNow(new ScreenshotWatcher.Result() {
+                @Override public void onDone(int n) {
+                    toast(n > 0 ? "Prints liberados! " + n + " já foram para a aba Imagens" : "Prints liberados!");
+                    updateShotStatus();
+                }
+            });
+            return;
+        }
         if (!ScreenshotWatcher.hasPermission(this) && android.os.Build.VERSION.SDK_INT >= 23
                 && !shouldShowRequestPermissionRationale(ScreenshotWatcher.permission())) {
             // negou de vez: abre a tela do app para liberar manualmente

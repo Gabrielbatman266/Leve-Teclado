@@ -36,6 +36,7 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
         void startSearch();
         void closePanel();
         void onClipDeleted(ClipStore.Item item);
+        void askScreenshotPermission();
     }
 
     private static final int TAB_ALL = 0, TAB_TEXT = 1, TAB_LINK = 2, TAB_IMAGE = 3, TAB_SAVED = 4;
@@ -52,7 +53,7 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
 
     private final TextView[] tabs = new TextView[TAB_NAMES.length];
     private final int[] counts = new int[TAB_NAMES.length];
-    private final TextView search, clear, close, empty;
+    private final TextView search, clear, close, empty, permHint;
     private final ListView list;
     private final Adapter adapter = new Adapter();
     private boolean confirmClear;
@@ -104,6 +105,19 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
         header.addView(clear, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
         header.addView(close, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
         addView(header, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+
+        permHint = new TextView(c);
+        permHint.setText("📸 Toque aqui para os prints de tela aparecerem nesta aba");
+        permHint.setGravity(Gravity.CENTER);
+        permHint.setTextSize(15);
+        permHint.setPadding(pad * 3, pad * 3, pad * 3, pad * 3);
+        permHint.setVisibility(GONE);
+        permHint.setOnClickListener(new OnClickListener() {
+            @Override public void onClick(View v) { ClipPanel.this.host.askScreenshotPermission(); }
+        });
+        LayoutParams ph = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        ph.setMargins(pad * 2, pad, pad * 2, pad);
+        addView(permHint, ph);
 
         empty = new TextView(c);
         empty.setGravity(Gravity.CENTER);
@@ -258,6 +272,16 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
             else empty.setText("Nada copiado ainda.\nTudo que você copiar aparece aqui.");
         } else {
             empty.setVisibility(GONE);
+        }
+        // aviso clicável quando os prints não estão liberados
+        boolean needPerm = tab == TAB_IMAGE && !ScreenshotWatcher.hasPermission(getContext());
+        permHint.setVisibility(needPerm ? VISIBLE : GONE);
+        if (needPerm) {
+            permHint.setTextColor(0xFF000000);
+            GradientDrawable g = new GradientDrawable();
+            g.setCornerRadius(12 * dp);
+            g.setColor(theme.accent);
+            permHint.setBackground(g);
         }
         styleChips();
         adapter.notifyDataSetChanged();

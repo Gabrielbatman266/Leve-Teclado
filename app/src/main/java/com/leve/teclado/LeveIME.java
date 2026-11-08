@@ -604,6 +604,14 @@ public final class LeveIME extends InputMethodService
 
     @Override public void startSearch() { setMode(MODE_SEARCH); }
 
+    @Override public void askScreenshotPermission() {
+        Intent i = new Intent(this, SettingsActivity.class);
+        i.putExtra("askShots", true);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        startActivity(i);
+        requestHideSelf(0);
+    }
+
     /** Apagou do histórico: se for o que está copiado no Android, limpa lá também (null = limpou tudo). */
     @Override public void onClipDeleted(ClipStore.Item item) {
         if (clipboard == null) return;

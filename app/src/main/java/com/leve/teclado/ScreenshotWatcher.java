@@ -44,6 +44,30 @@ final class ScreenshotWatcher extends ContentObserver {
                 : Manifest.permission.READ_EXTERNAL_STORAGE;
     }
 
+    /** Android 14: usuário escolheu "só algumas fotos" (aí os prints novos não aparecem). */
+    static boolean partialOnly(Context c) {
+        if (Build.VERSION.SDK_INT < 34) return false;
+        return !hasPermission(c) && c.checkSelfPermission("android.permission.READ_MEDIA_VISUAL_USER_SELECTED")
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    interface Result { void onDone(int found); }
+
+    /** Busca manual (botão "Buscar prints agora"): olha as últimas 24 h, ignora o ponto de partida. */
+    void scanNow(final Result r) {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final ArrayList<Uri> found = hasPermission(ctx) ? findNew(true) : new ArrayList<Uri>();
+                main.post(new Runnable() {
+                    @Override public void run() {
+                        for (int i = found.size() - 1; i >= 0; i--) store.offerScreenshot(ctx.getContentResolver(), found.get(i));
+                        if (r != null) r.onDone(found.size());
+                    }
+                });
+            }
+        }).start();
+    }
+
     static boolean hasPermission(Context c) {
         if (Build.VERSION.SDK_INT < 23) return true;
         return c.checkSelfPermission(permission()) == PackageManager.PERMISSION_GRANTED;
@@ -86,7 +110,7 @@ final class ScreenshotWatcher extends ContentObserver {
             scanning = true;
             new Thread(new Runnable() {
                 @Override public void run() {
-                    final ArrayList<Uri> found = findNew();
+                    final ArrayList<Uri> found = findNew(false);
                     main.post(new Runnable() {
                         @Override public void run() {
                             scanning = false;
@@ -99,36 +123,39 @@ final class ScreenshotWatcher extends ContentObserver {
         }
     };
 
-    private ArrayList<Uri> findNew() {
+    private ArrayList<Uri> findNew(boolean manual) {
         ArrayList<Uri> out = new ArrayList<>();
         long now = System.currentTimeMillis() / 1000;
         long last = sp.getLong("shotLastSec", 0);
         if (last == 0) {
-            // primeira vez: não puxa todos os prints antigos, só os de agora em diante
-            sp.edit().putLong("shotLastSec", now - 60).apply();
-            last = now - 60;
+            // primeira vez: pega os prints das últimas 6 horas (não perde os tirados logo após liberar)
+            last = now - 6 * 60 * 60;
+            sp.edit().putLong("shotLastSec", last).apply();
         }
-        long since = Math.max(last, now - MAX_AGE_SEC);
+        long since = manual ? now - MAX_AGE_SEC : Math.max(last, now - MAX_AGE_SEC);
 
         ContentResolver cr = ctx.getContentResolver();
         boolean q = Build.VERSION.SDK_INT >= 29;
         String[] proj = q
                 ? new String[]{MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED,
                         MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.RELATIVE_PATH,
-                        MediaStore.Images.Media.BUCKET_DISPLAY_NAME}
+                        MediaStore.Images.Media.BUCKET_DISPLAY_NAME, MediaStore.Images.Media.DATA}
                 : new String[]{MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED,
                         MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.DATA,
                         MediaStore.Images.Media.BUCKET_DISPLAY_NAME};
-        String sel = MediaStore.Images.Media.DATE_ADDED + " > ?" + (q ? " AND " + MediaStore.Images.Media.IS_PENDING + " = 0" : "");
+        // sem filtro de data na consulta (alguns celulares gravam a data em milissegundos): filtra aqui
+        String sel = q ? MediaStore.Images.Media.IS_PENDING + " = 0" : null;
         long newest = last;
         Cursor c = null;
         try {
             c = cr.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, proj, sel,
-                    new String[]{String.valueOf(since)}, MediaStore.Images.Media.DATE_ADDED + " DESC");
+                    null, MediaStore.Images.Media._ID + " DESC");
             if (c == null) return out;
             int rows = 0;
             while (c.moveToNext() && rows++ < 40) {
                 long id = c.getLong(0), added = c.getLong(1);
+                if (added > 100000000000L) added /= 1000; // estava em milissegundos
+                if (added <= since) continue;
                 StringBuilder where = new StringBuilder();
                 for (int i = 2; i < proj.length; i++) {
                     String v = c.getString(i);
@@ -147,7 +174,8 @@ final class ScreenshotWatcher extends ContentObserver {
         } finally {
             if (c != null) c.close();
         }
-        if (newest > last) sp.edit().putLong("shotLastSec", newest).apply();
+        if (newest > last && !manual) sp.edit().putLong("shotLastSec", newest).apply();
+        if (!out.isEmpty()) sp.edit().putLong("shotFoundAt", System.currentTimeMillis()).apply();
         return out;
     }
 }
