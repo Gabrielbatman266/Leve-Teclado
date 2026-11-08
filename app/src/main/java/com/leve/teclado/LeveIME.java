@@ -175,6 +175,7 @@ public final class LeveIME extends InputMethodService
         long at = System.currentTimeMillis() + min * 60_000L;
         try {
             org.json.JSONArray a = new org.json.JSONArray(Prefs.sp(this).getString("plExpire", "[]"));
+            for (int i = 0; i < a.length(); i++) if (t.equals(a.getJSONObject(i).optString("t"))) return; // já marcado
             a.put(new org.json.JSONObject().put("t", t).put("at", at));
             Prefs.sp(this).edit().putString("plExpire", a.toString()).apply();
         } catch (Exception ignored) { }
@@ -664,7 +665,7 @@ public final class LeveIME extends InputMethodService
             boolean fromPostLeve = label != null && "PostLeve".contentEquals(label);
             if (t != null && !(passwordField && isInputViewShown())) {
                 store.offerFromSystem(t.toString(), isNewCopy);
-                if (fromPostLeve && isNewCopy) expireLater(t.toString());
+                if (fromPostLeve) expireLater(t.toString());
                 else if (isNewCopy && feedingNow()) feedPostLeve(t.toString());
             }
             if (isNewCopy) purgeExpired();

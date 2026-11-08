@@ -48,5 +48,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+            <!-- o Post Leve avisa quais legendas apagar do histórico -->
+        <receiver android:name=".PostLeveReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.leve.teclado.EXPIRE" />
+                <action android:name="com.leve.teclado.FORGET" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

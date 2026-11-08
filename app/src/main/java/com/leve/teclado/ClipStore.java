@@ -151,8 +151,9 @@ final class ClipStore {
     /** Tira do histórico um texto (não mexe nos salvos ★). */
     boolean removeText(String t) {
         if (t == null || !loaded) return false;
-        for (Item it : new ArrayList<>(items)) if (!it.isImage() && !it.pinned && it.text.equals(t)) { remove(it); return true; }
-        return false;
+        boolean any = false; String tt = t.trim();
+        for (Item it : new ArrayList<>(items)) if (!it.isImage() && !it.pinned && it.text != null && it.text.trim().equals(tt)) { remove(it); any = true; }
+        return any;
     }
 
     void remove(Item it) {
