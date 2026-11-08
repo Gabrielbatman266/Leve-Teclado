@@ -116,6 +116,9 @@ public final class LeveIME extends InputMethodService
         buildSuggestionBar();
         topBar.addView(sugBar, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
+        buildReplyStrip();
+        topBar.addView(replyScroll, new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(topBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (44 * dp)));
 
         panel = new ClipPanel(this, store, this);
@@ -208,6 +211,7 @@ public final class LeveIME extends InputMethodService
     public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
         prefs = Prefs.load(this);
+        if (info != null && info.packageName != null && !info.packageName.equals(getPackageName())) { lastPkg = info.packageName; lastPkgAt = System.currentTimeMillis(); }
         store.setMax(prefs.historyMax);
         int cls = info.inputType & InputType.TYPE_MASK_CLASS;
         int variation = info.inputType & InputType.TYPE_MASK_VARIATION;
@@ -268,7 +272,86 @@ public final class LeveIME extends InputMethodService
 
     // ------------------------------------------------------------ barra de ferramentas
 
+    // ------------------------------------------------------------ 💬 respostas sugeridas (Threads/Instagram, via Post Leve)
+    private TextView replyTool;
+    private HorizontalScrollView replyScroll;
+    private LinearLayout replyRow;
+    private String lastCopied = ""; private long lastCopiedAt;
+
+    private void buildReplyStrip() {
+        replyScroll = new HorizontalScrollView(this);
+        replyScroll.setHorizontalScrollBarEnabled(false);
+        replyRow = new LinearLayout(this);
+        replyRow.setOrientation(LinearLayout.HORIZONTAL);
+        replyRow.setGravity(Gravity.CENTER_VERTICAL);
+        replyScroll.addView(replyRow);
+        replyScroll.setVisibility(View.GONE);
+    }
+
+    private TextView replyChip(String label, final Runnable r) {
+        TextView t = new TextView(this);
+        t.setText(label); t.setTextSize(14); t.setSingleLine(true); t.setGravity(Gravity.CENTER);
+        int h = (int) (12 * dp), v = (int) (7 * dp);
+        t.setPadding(h, v, h, v);
+        t.setTextColor(theme.text);
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setColor(theme.key); g.setCornerRadius(14 * dp); t.setBackground(g);
+        if (r != null) t.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { r.run(); } });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins((int) (3 * dp), 0, (int) (3 * dp), 0);
+        replyRow.addView(t, lp);
+        return t;
+    }
+
+    private void closeReplies() { if (replyScroll != null) replyScroll.setVisibility(View.GONE); }
+
+    /** Pede ao Post Leve 3 respostas no seu jeito de escrever. Quem envia é você. */
+    private void suggestReplies() {
+        replyRow.removeAllViews();
+        replyScroll.setBackgroundColor(theme.bar);
+        replyScroll.setVisibility(View.VISIBLE);
+        replyChip("✕", new Runnable() { public void run() { closeReplies(); } });
+        replyChip("⏳ pensando…", null);
+        InputConnection ic = getCurrentInputConnection();
+        EditorInfo ei = getCurrentInputEditorInfo();
+        StringBuilder ctx = new StringBuilder();
+        if (ei != null && ei.hintText != null) ctx.append("campo: ").append(ei.hintText).append("\n");
+        if (System.currentTimeMillis() - lastCopiedAt < 5 * 60_000L && !lastCopied.isEmpty()) ctx.append("comentário copiado: ").append(lastCopied).append("\n");
+        CharSequence before = ic == null ? null : ic.getTextBeforeCursor(300, 0);
+        if (before != null && before.length() > 0) ctx.append("já escrito: ").append(before).append("\n");
+        final String context = ctx.toString();
+        final String app = lastPkg;
+        new Thread(new Runnable() { public void run() {
+            String[] r = null; String err = null;
+            try {
+                android.os.Bundle in = new android.os.Bundle(); in.putString("app", app);
+                android.os.Bundle out = getContentResolver().call(android.net.Uri.parse("content://com.leve.analise.respostas"), "sugerir", context, in);
+                if (out != null) { r = out.getStringArray("r"); err = out.getString("erro"); }
+            } catch (Exception e) { err = "Instale/atualize o Post Leve"; }
+            final String[] fr = r; final String fe = err;
+            ui.post(new Runnable() { public void run() {
+                replyRow.removeAllViews();
+                replyChip("✕", new Runnable() { public void run() { closeReplies(); } });
+                if (fr == null || fr.length == 0) { replyChip(fe == null ? "sem sugestões" : fe, null); return; }
+                for (final String s : fr) replyChip(s.length() > 42 ? s.substring(0, 40) + "…" : s, new Runnable() { public void run() {
+                    InputConnection ic2 = getCurrentInputConnection();
+                    if (ic2 != null) ic2.commitText(s, 1);
+                    closeReplies();
+                } });
+                replyChip("↻", new Runnable() { public void run() { suggestReplies(); } });
+            } });
+        } }).start();
+    }
+
+    private void updateReplyTool() {
+        if (replyTool == null) return;
+        boolean social = THREADS.equals(lastPkg) || INSTAGRAM.equals(lastPkg);
+        replyTool.setVisibility(social && !passwordField ? View.VISIBLE : View.GONE);
+        if (!social) closeReplies();
+    }
+
     private void buildToolbar() {
+        replyTool = tool("💬", new Runnable() { public void run() { suggestReplies(); } });
         tool("📋", new Runnable() { public void run() { setMode(mode == MODE_KEYS ? MODE_CLIP : MODE_KEYS); } });
         tool("😊", new Runnable() { public void run() { setMode(mode == MODE_EMOJI ? MODE_KEYS : MODE_EMOJI); } });
         latestChip = tool("📎", new Runnable() { public void run() { pasteLatest(); } });
@@ -518,6 +601,7 @@ public final class LeveIME extends InputMethodService
     }
 
     private void updateSuggestionVisibility() {
+        updateReplyTool();
         if (sugBar == null) return;
         boolean showSug = suggestOk && !curWord.isEmpty() && !forceToolbar && mode == MODE_KEYS;
         if (!prefs.showToolbar && suggestOk && mode == MODE_KEYS) showSug = true; // barra só de sugestões
@@ -671,6 +755,7 @@ public final class LeveIME extends InputMethodService
             CharSequence t = first.coerceToText(this);
             CharSequence label = clip.getDescription() == null ? null : clip.getDescription().getLabel();
             boolean fromPostLeve = label != null && "PostLeve".contentEquals(label);
+            if (t != null && isNewCopy) { lastCopied = t.toString(); lastCopiedAt = System.currentTimeMillis(); }
             if (t != null && !(passwordField && isInputViewShown())) {
                 store.offerFromSystem(t.toString(), isNewCopy);
                 if (fromPostLeve) expireLater(t.toString());

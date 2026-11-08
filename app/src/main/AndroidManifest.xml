@@ -11,6 +11,7 @@
     <!-- pra mandar textos copiados no Threads pro Post Leve -->
     <queries>
         <package android:name="com.leve.analise" />
+        <provider android:authorities="com.leve.analise.respostas" />
     </queries>
 
     <application
