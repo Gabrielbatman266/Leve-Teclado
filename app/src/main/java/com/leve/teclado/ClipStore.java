@@ -47,8 +47,19 @@ final class ClipStore {
         boolean isImage() { return img != null; }
 
         boolean isLink() {
-            if (link == null) link = img == null && text.length() < 2000 && Patterns.WEB_URL.matcher(text).find();
+            if (link == null) link = img == null && looksLikeLink(text);
             return link;
+        }
+
+        /**
+         * Rápido: o "regex de site" do Android é lento em textos longos (abrir o painel com
+         * 10 mil itens levava segundos). Só roda ele em textos curtos, sem espaço, com ponto.
+         */
+        static boolean looksLikeLink(String t) {
+            if (t.length() >= 2000) return false;
+            if (t.contains("://") || t.contains("www.")) return true;
+            if (t.length() > 120 || t.indexOf('.') < 0 || t.trim().indexOf(' ') >= 0) return false;
+            return Patterns.WEB_URL.matcher(t).find();
         }
 
         boolean matches(int kind) {
@@ -65,6 +76,12 @@ final class ClipStore {
 
     private static ClipStore instance;
     private static final int MAX_CHARS = 200_000;
+    /**
+     * Teto de letras guardadas no total (~16 MB). Textos curtos: cabem os 10.000 itens.
+     * Textos gigantes: os mais antigos saem antes de pesar no celular (antes podia chegar a 2 GB e fechar o teclado).
+     */
+    static final long MAX_TOTAL_CHARS = 8_000_000L;
+    private static final int MAX_REMOVED_MEMO = 2000;
     private static final int MAX_IMAGES = 150;                 // imagens não salvas guardadas
     private static final long MAX_IMAGE_BYTES = 25L * 1024 * 1024;
     private static final Charset UTF8 = Charset.forName("UTF-8");
@@ -104,8 +121,10 @@ final class ClipStore {
                     @Override public void run() {
                         items.addAll(0, list);
                         loaded = true;
+                        trim();
                         for (String p : pending) add(p);
                         pending.clear();
+                        version++;
                         notifyChanged();
                     }
                 });
@@ -176,6 +195,7 @@ final class ClipStore {
             final File f = new File(imgDir, it.img);
             io.execute(new Runnable() { @Override public void run() { f.delete(); } });
         } else {
+            if (removed.size() >= MAX_REMOVED_MEMO) removed.clear(); // só a memória de "apagados": não cresce sem fim
             removed.put(it.text.hashCode(), it.text.length());
         }
     }
@@ -316,16 +336,26 @@ final class ClipStore {
 
     private void trim() {
         int texts = 0, images = 0;
+        long chars = 0;
+        for (Item it : items) if (it.pinned && it.text != null) chars += it.text.length();
+        boolean any = false;
+        // percorre do mais novo pro mais antigo, montando a lista que fica (sem remover no meio: rápido)
+        ArrayList<Item> keep = null;
         for (int i = 0; i < items.size(); i++) {
             Item it = items.get(i);
-            if (it.pinned) continue;
-            boolean over = it.isImage() ? ++images > MAX_IMAGES : ++texts > max;
-            if (over) {
-                items.remove(i);
-                if (it.isImage()) forget(it);
-                i--;
+            boolean over = false;
+            if (!it.pinned) {
+                int len = it.text == null ? 0 : it.text.length();
+                over = it.isImage() ? ++images > MAX_IMAGES : (++texts > max || chars + len > MAX_TOTAL_CHARS);
+                if (!over && !it.isImage()) chars += len;
             }
+            if (over) {
+                if (keep == null) { keep = new ArrayList<>(items.size()); keep.addAll(items.subList(0, i)); }
+                if (it.isImage()) forget(it);
+                any = true;
+            } else if (keep != null) keep.add(it);
         }
+        if (any) { items.clear(); items.addAll(keep); }
     }
 
     void setMax(int m) {
@@ -340,20 +370,63 @@ final class ClipStore {
         return n;
     }
 
+    /** Muda a cada alteração da lista (a busca usa para saber se pode reaproveitar o resultado). */
+    int version;
+
     private void changed() {
+        version++;
         notifyChanged();
         main.removeCallbacks(saveTask);
         main.postDelayed(saveTask, 700);
     }
 
+    /**
+     * Salvar: na tela principal só tira uma "foto" rápida da lista; montar e gravar o arquivo
+     * acontece em segundo plano (antes 10 mil itens travavam o teclado por ~0,2 s a cada cópia).
+     */
     private final Runnable saveTask = new Runnable() {
         @Override public void run() {
-            final String json = toJson(items, true).toString();
+            final Item[] snap = new Item[items.size()];
+            for (int i = 0; i < snap.length; i++) {
+                Item it = items.get(i);
+                Item c = new Item(it.text, it.time, it.pinned);
+                c.img = it.img; c.w = it.w; c.h = it.h; c.shot = it.shot;
+                snap[i] = c;
+            }
             io.execute(new Runnable() {
-                @Override public void run() { writeAtomic(file, json); }
+                @Override public void run() { writeStream(file, java.util.Arrays.asList(snap)); }
             });
         }
     };
+
+    /** Grava direto no arquivo, item por item (não monta um textão gigante na memória). */
+    private static void writeStream(File f, List<Item> list) {
+        File tmp = new File(f.getPath() + ".tmp");
+        try {
+            FileOutputStream out = new FileOutputStream(tmp);
+            android.util.JsonWriter w = new android.util.JsonWriter(new java.io.BufferedWriter(
+                    new java.io.OutputStreamWriter(out, UTF8), 65536));
+            w.beginArray();
+            for (Item it : list) {
+                w.beginObject();
+                w.name("t").value(it.text);
+                w.name("d").value(it.time);
+                if (it.pinned) w.name("p").value(true);
+                if (it.isImage()) {
+                    w.name("i").value(it.img); w.name("w").value(it.w); w.name("h").value(it.h);
+                    if (it.shot) w.name("s").value(true);
+                }
+                w.endObject();
+            }
+            w.endArray();
+            w.flush();
+            out.getFD().sync();
+            w.close();
+            if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f); }
+        } catch (Exception e) {
+            tmp.delete();
+        }
+    }
 
     // ---------- backup (só textos) ----------
 
@@ -373,6 +446,7 @@ final class ClipStore {
         java.util.Collections.sort(items, new java.util.Comparator<Item>() {
             @Override public int compare(Item a, Item b) { return Long.compare(b.time, a.time); }
         });
+        trim();
         changed();
         return added;
     }
@@ -417,13 +491,55 @@ final class ClipStore {
         return list;
     }
 
+    /**
+     * Lê o histórico aos poucos (sem carregar o arquivo inteiro de uma vez). Se o arquivo estiver
+     * cortado no meio (celular desligou), aproveita tudo que dá para ler.
+     */
     private static ArrayList<Item> readFile(File f) {
-        if (!f.exists()) return new ArrayList<>();
+        ArrayList<Item> list = new ArrayList<>();
+        if (!f.exists()) return list;
+        android.util.JsonReader r = null;
+        long total = 0;
         try {
-            return parse(readAll(new FileInputStream(f)));
-        } catch (Exception e) {
-            return new ArrayList<>();
+            r = new android.util.JsonReader(new java.io.BufferedReader(
+                    new java.io.InputStreamReader(new FileInputStream(f), UTF8), 65536));
+            r.beginArray();
+            while (r.hasNext()) {
+                String t = "", img = null;
+                long d = 0;
+                boolean p = false, shot = false;
+                int w = 0, h = 0;
+                r.beginObject();
+                while (r.hasNext()) {
+                    String n = r.nextName();
+                    if (r.peek() == android.util.JsonToken.NULL) { r.skipValue(); continue; }
+                    switch (n) {
+                        case "t": t = r.nextString(); break;
+                        case "d": d = r.nextLong(); break;
+                        case "p": p = r.nextBoolean(); break;
+                        case "i": img = r.nextString(); break;
+                        case "w": w = r.nextInt(); break;
+                        case "h": h = r.nextInt(); break;
+                        case "s": shot = r.nextBoolean(); break;
+                        default: r.skipValue();
+                    }
+                }
+                r.endObject();
+                if (t.length() > MAX_CHARS) t = t.substring(0, MAX_CHARS);
+                Item it = new Item(t, d, p);
+                if (img != null && !img.isEmpty() && img.indexOf('/') < 0) {
+                    it.img = img; it.w = w; it.h = h; it.shot = shot;
+                } else if (t.isEmpty()) continue;
+                if (!p && total + t.length() > MAX_TOTAL_CHARS) continue; // arquivo antigo enorme: fica só o que cabe
+                total += t.length();
+                list.add(it);
+            }
+        } catch (Throwable e) {
+            // arquivo quebrado: fica com o que já leu
+        } finally {
+            if (r != null) try { r.close(); } catch (Exception ignored) { }
         }
+        return list;
     }
 
     static String readAll(InputStream in) throws java.io.IOException {
@@ -438,14 +554,4 @@ final class ClipStore {
         }
     }
 
-    private static void writeAtomic(File f, String data) {
-        File tmp = new File(f.getPath() + ".tmp");
-        try {
-            FileOutputStream out = new FileOutputStream(tmp);
-            out.write(data.getBytes(UTF8));
-            out.getFD().sync();
-            out.close();
-            if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f); }
-        } catch (Exception ignored) { }
-    }
 }

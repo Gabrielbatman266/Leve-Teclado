@@ -40,14 +40,18 @@ final class Prefs {
         p.autoCorrect = s.getBoolean("autoCorrect", true);
         p.saveImages = s.getBoolean("saveImages", true);
         p.saveShots = s.getBoolean("saveShots", true);
-        p.keyHeightDp = s.getInt("keyHeightDp", 50);
-        p.textScale = s.getInt("textScale", 100);
-        p.longPressMs = s.getInt("longPressMs", 320);
-        p.historyMax = s.getInt("historyMax", 1000);
-        p.theme = s.getInt("theme", 0);
+        // valores sempre dentro de limites seguros (um backup ou ajuste estranho não quebra o teclado)
+        p.keyHeightDp = clamp(s.getInt("keyHeightDp", 50), 30, 120);
+        p.textScale = clamp(s.getInt("textScale", 100), 50, 250);
+        p.longPressMs = clamp(s.getInt("longPressMs", 320), 100, 2000);
+        p.historyMax = clamp(s.getInt("historyMax", 1000), 10, 10000);
+        p.theme = clamp(s.getInt("theme", 0), 0, Theme.NAMES.length - 1);
+        p.postLeveTtl = clamp(p.postLeveTtl, 0, 7 * 24 * 60);
         p.shortcuts.putAll(loadShortcuts(s));
         return p;
     }
+
+    static int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
 
     static Map<String, String> loadShortcuts(SharedPreferences s) {
         Map<String, String> m = new LinkedHashMap<>();

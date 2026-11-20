@@ -34,4 +34,21 @@ Vá em **Releases** → baixe `Leve-Teclado.apk` → instale → abra o app → 
 
 **Acessibilidade:** altura das teclas, tamanho das letras, tempo do toque longo, prévia ampliada, tema **Conforto** (minimalista, teclas grandes e espaçadas para dedos grandes), Alto contraste, AMOLED preto (economiza bateria), Escuro e Claro.
 
+**Mais leve e mais seguro (atualização de estresse)**
+- ⌫ apaga emoji inteiro de uma vez: 👍🏽, 👨‍👩‍👧, 🇧🇷, ❤️ e letras com acento separado
+- Senhas nunca entram no histórico (campo de senha ou cópia marcada como sensível pelo app de senhas/banco)
+- O teclado nunca passa de metade da tela; deitado, a fileira de números vira toque longo
+- Nome das teclas diminui sozinho para caber (letra grande), botões da barra com 36 dp
+- Histórico salvo em segundo plano (não trava ao copiar) e com teto de ~8 milhões de letras
+  (10.000 textos normais cabem; textos gigantes antigos saem antes de pesar no celular)
+- Busca no histórico e painel abrem rápido mesmo com 10.000 itens
+- Dicionário aprende até 40 mil palavras (as menos usadas saem) e sugere em menos de 1 ms
+- Deslizar no espaço move o cursor direto (funciona em mais apps)
+
+## Testes de estresse
+`gradle :app:testDebugUnitTest` roda 62 verificações em 10 níveis (fácil → impossível): digitação,
+emojis, 50–200 mil palavras aprendidas, 10.000 cópias, textos de 5 milhões de letras, arquivos
+corrompidos, 4 tamanhos de tela, 30 mil toques aleatórios com vários dedos. Placar em
+`app/build/stress/teclado.tsv`. Os testes não entram no APK.
+
 O APK é compilado automaticamente pelo GitHub Actions a cada push.

@@ -91,9 +91,44 @@ final class KeyboardView extends View {
         return (int) (rows.size() * keyHeightPx() + 8 * dp);
     }
 
-    /** Altura da tecla: a da configuração, mas nunca menor que o mínimo do tema (Conforto). */
+    private int reservedPx;
+
+    /** Altura da barra de cima (sugestões/ferramentas): entra na conta do tamanho máximo. */
+    void setReservedPx(int px) {
+        if (px != reservedPx) { reservedPx = px; requestLayout(); }
+    }
+
+    /**
+     * Altura da tecla: a da configuração (nunca menor que o mínimo do tema Conforto),
+     * mas o teclado inteiro nunca passa de metade da tela (56% deitado) — antes, com
+     * teclas grandes ou celular deitado, ele cobria quase tudo.
+     */
     float keyHeightPx() {
-        return Math.max(prefs.keyHeightDp, theme.minKeyHeightDp) * dp;
+        float want = Math.max(prefs.keyHeightDp, theme.minKeyHeightDp) * dp;
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        boolean land = dm.widthPixels > dm.heightPixels;
+        int n = rows == null || rows.isEmpty() ? 4 : rows.size();
+        float maxTotal = dm.heightPixels * (land ? 0.56f : 0.5f) - reservedPx - 8 * dp;
+        float cap = maxTotal / n;
+        return Math.max(30 * dp, Math.min(want, cap));
+    }
+
+    /** Tamanho da letra de uma tecla; se o nome não cabe (letra grande), diminui até caber. */
+    float labelSize(Layouts.Key k, String label) {
+        float scale = prefs.textScale / 100f * theme.textMul;
+        float size;
+        if (k.code == Layouts.SPACE) size = 13 * dp * scale;
+        else if (label.length() > 1) size = (label.length() > 3 ? 13 : 15) * dp * scale;
+        else size = (k.special ? 20 : 22) * dp * scale;
+        return fit(label, size, k.w - 2 * theme.gapDp * dp);
+    }
+
+    private float fit(String label, float size, float width) {
+        float avail = width - 4 * dp;
+        if (avail <= 0) return size;
+        textPaint.setTextSize(size);
+        float w = textPaint.measureText(label);
+        return w > avail && w > 0 ? size * avail / w : size;
     }
 
     @Override
@@ -153,16 +188,14 @@ final class KeyboardView extends View {
 
                 float size;
                 if (k.code == Layouts.SPACE) {
-                    size = 13 * dp * scale;
                     if (spaceSwipe && k == active) label = "◀  cursor  ▶";
+                    size = fit(label, 13 * dp * scale, rect.width());
                     textPaint.setColor(theme.textDim);
                 } else if (k.code == Layouts.DEL && delSwipe && k == active) {
                     label = "−" + delWords;
-                    size = 16 * dp * scale;
-                } else if (label.length() > 1) {
-                    size = (label.length() > 3 ? 13 : 15) * dp * scale;
+                    size = fit(label, 16 * dp * scale, rect.width());
                 } else {
-                    size = (k.special ? 20 : 22) * dp * scale;
+                    size = labelSize(k, label);
                 }
                 textPaint.setTextSize(size);
                 textPaint.setTypeface(k.special ? Typeface.DEFAULT : Typeface.DEFAULT);

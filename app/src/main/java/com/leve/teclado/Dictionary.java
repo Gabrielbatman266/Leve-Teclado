@@ -39,6 +39,11 @@ final class Dictionary {
     private final ArrayList<Entry> entries = new ArrayList<>();
     private final HashMap<String, Entry> byWord = new HashMap<>();
     private final HashMap<String, Entry> bestByKey = new HashMap<>(); // sem acento -> forma mais usada
+    /** Índice ordenado (sem acento): a sugestão só olha as palavras com o mesmo começo. */
+    private final java.util.TreeMap<String, Object> byKey = new java.util.TreeMap<>();
+    /** Limite de palavras aprendidas: as menos usadas saem quando passa disso (memória e velocidade). */
+    static final int MAX_LEARNED = 40000;
+    private int learnedCount;
     private final File userFile;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -95,8 +100,64 @@ final class Dictionary {
         e = new Entry(w, base);
         entries.add(e);
         byWord.put(w, e);
+        index(e);
+        if (base == 0) learnedCount++;
         reindex(e);
         return e;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void index(Entry e) {
+        Object cur = byKey.get(e.key);
+        if (cur == null) byKey.put(e.key, e);
+        else if (cur instanceof Entry) {
+            ArrayList<Entry> l = new ArrayList<>(2);
+            l.add((Entry) cur);
+            l.add(e);
+            byKey.put(e.key, l);
+        } else ((ArrayList<Entry>) cur).add(e);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void unindex(Entry e) {
+        Object cur = byKey.get(e.key);
+        if (cur == e) byKey.remove(e.key);
+        else if (cur instanceof ArrayList) {
+            ArrayList<Entry> l = (ArrayList<Entry>) cur;
+            l.remove(e);
+            if (l.size() == 1) byKey.put(e.key, l.get(0));
+            else if (l.isEmpty()) byKey.remove(e.key);
+        }
+    }
+
+    /** Tira uma palavra aprendida de todos os lugares. */
+    private void drop(Entry e) {
+        byWord.remove(e.word);
+        unindex(e);
+        if (e.base == 0) learnedCount--;
+        if (bestByKey.get(e.key) == e) {
+            bestByKey.remove(e.key);
+            Object cur = byKey.get(e.key);
+            if (cur instanceof Entry) reindex((Entry) cur);
+            else if (cur != null) for (Object o : (ArrayList<?>) cur) reindex((Entry) o);
+        }
+    }
+
+    /** Passou do limite: esquece de uma vez as 10% menos usadas (raro, barato). */
+    private void evictIfNeeded() {
+        if (learnedCount <= MAX_LEARNED * 11 / 10) return;
+        ArrayList<Entry> learned = new ArrayList<>();
+        for (Entry e : entries) if (e.base == 0) learned.add(e);
+        java.util.Collections.sort(learned, new java.util.Comparator<Entry>() {
+            @Override public int compare(Entry a, Entry b) { return a.user - b.user; }
+        });
+        int remove = learned.size() - MAX_LEARNED;
+        java.util.HashSet<Entry> gone = new java.util.HashSet<>();
+        for (int i = 0; i < remove; i++) { gone.add(learned.get(i)); drop(learned.get(i)); }
+        ArrayList<Entry> keep = new ArrayList<>(entries.size() - gone.size());
+        for (Entry e : entries) if (!gone.contains(e)) keep.add(e);
+        entries.clear();
+        entries.addAll(keep);
     }
 
     private void reindex(Entry e) {
@@ -116,8 +177,15 @@ final class Dictionary {
         String key = strip(typed);
         Entry[] top = new Entry[max];
         int[] sc = new int[max];
-        for (int i = 0, n = entries.size(); i < n; i++) {
-            Entry e = entries.get(i);
+        // só as palavras que começam igual (índice ordenado): rápido mesmo com dezenas de milhares
+        ArrayList<Entry> cands = new ArrayList<>();
+        for (Object o : byKey.subMap(key, true, key + Character.MAX_VALUE, false).values()) {
+            if (o instanceof Entry) cands.add((Entry) o);
+            else for (Object x : (ArrayList<?>) o) cands.add((Entry) x);
+            if (cands.size() > 20000) break;
+        }
+        for (int i = 0, n = cands.size(); i < n; i++) {
+            Entry e = cands.get(i);
             if (!e.key.startsWith(key) || e.word.equals(lower)) continue;
             int s = e.score();
             if (e.word.startsWith(lower)) s += 150;           // respeita o acento que você já digitou
@@ -167,6 +235,7 @@ final class Dictionary {
         Entry e = put(w, 0);
         e.user++;
         reindex(e);
+        evictIfNeeded();
         scheduleSave();
     }
 
@@ -178,11 +247,7 @@ final class Dictionary {
         e.user = 0;
         if (e.base == 0) {
             entries.remove(e);
-            byWord.remove(e.word);
-            if (bestByKey.get(e.key) == e) {
-                bestByKey.remove(e.key);
-                for (Entry o : entries) if (o.key.equals(e.key)) reindex(o);
-            }
+            drop(e);
         }
         scheduleSave();
     }
@@ -200,10 +265,14 @@ final class Dictionary {
             } catch (Exception ignored) { }
             io.execute(new Runnable() {
                 @Override public void run() {
+                    // grava num arquivo temporário e troca: se o celular desligar no meio, nada se perde
+                    File tmp = new File(userFile.getPath() + ".tmp");
                     try {
-                        FileOutputStream out = new FileOutputStream(userFile);
+                        FileOutputStream out = new FileOutputStream(tmp);
                         out.write(o.toString().getBytes("UTF-8"));
+                        out.getFD().sync();
                         out.close();
+                        if (!tmp.renameTo(userFile)) { userFile.delete(); tmp.renameTo(userFile); }
                     } catch (Exception ignored) { }
                 }
             });
@@ -214,7 +283,7 @@ final class Dictionary {
         for (int i = entries.size() - 1; i >= 0; i--) {
             Entry e = entries.get(i);
             e.user = 0;
-            if (e.base == 0) { entries.remove(i); byWord.remove(e.word); }
+            if (e.base == 0) { entries.remove(i); byWord.remove(e.word); unindex(e); learnedCount--; }
         }
         bestByKey.clear();
         for (Entry e : entries) reindex(e);

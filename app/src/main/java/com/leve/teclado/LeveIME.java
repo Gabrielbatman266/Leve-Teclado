@@ -45,7 +45,7 @@ public final class LeveIME extends InputMethodService
     private KeyboardView keyboard;
     private ClipPanel panel;
     private EmojiPanel emojiPanel;
-    private TextView latestChip, selChip;
+    private TextView latestChip, selChip, clipTool, emojiTool;
     private android.widget.FrameLayout topBar;
     private LinearLayout sugBar;
     private final TextView[] sugViews = new TextView[3];
@@ -61,7 +61,7 @@ public final class LeveIME extends InputMethodService
     private int layer = Layouts.LETTERS;
     private int shiftState;
     private long lastShiftTap, lastSpaceTime;
-    private boolean selectMode, passwordField;
+    private boolean selectMode, passwordField, viewActive;
     private int selStart, selEnd;
 
     // ------------------------------------------------------------ ciclo de vida
@@ -88,6 +88,7 @@ public final class LeveIME extends InputMethodService
         if (clipboard != null) clipboard.removePrimaryClipChangedListener(this);
         store.removeListener(this);
         if (shots != null) shots.stop();
+        ui.removeCallbacksAndMessages(null); // nada pendente segurando o teclado velho na memória
         super.onDestroy();
     }
 
@@ -210,6 +211,8 @@ public final class LeveIME extends InputMethodService
     @Override
     public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
+        if (info == null) info = new EditorInfo(); // alguns apps mandam o campo "vazio"
+        viewActive = true;
         prefs = Prefs.load(this);
         if (info != null && info.packageName != null && !info.packageName.equals(getPackageName())) { lastPkg = info.packageName; lastPkgAt = System.currentTimeMillis(); }
         store.setMax(prefs.historyMax);
@@ -250,7 +253,14 @@ public final class LeveIME extends InputMethodService
     @Override
     public void onFinishInputView(boolean finishing) {
         super.onFinishInputView(finishing);
+        viewActive = false;
         if (keyboard != null) keyboard.cancelTouch();
+    }
+
+    /** Deitado, a fileira de números vira toque longo (sobra tela para o app). */
+    private boolean numberRow() {
+        return prefs.numberRow && getResources().getConfiguration().orientation
+                != android.content.res.Configuration.ORIENTATION_LANDSCAPE;
     }
 
     private void applyPrefs() {
@@ -261,11 +271,12 @@ public final class LeveIME extends InputMethodService
         tb.height = (int) ((theme.big ? 52 : 44) * dp);
         topBar.setLayoutParams(tb);
         topBar.setVisibility(prefs.showToolbar || prefs.suggestions ? View.VISIBLE : View.GONE);
+        keyboard.setReservedPx(topBar.getVisibility() == View.GONE ? 0 : tb.height);
         styleToolbar();
         styleSuggestions();
         panel.applyTheme(theme);
         emojiPanel.applyTheme(theme);
-        keyboard.configure(prefs, Layouts.build(layer, prefs.numberRow));
+        keyboard.configure(prefs, Layouts.build(layer, numberRow()));
         keyboard.setShiftState(shiftState);
         refreshLatestChip();
     }
@@ -352,8 +363,8 @@ public final class LeveIME extends InputMethodService
 
     private void buildToolbar() {
         replyTool = tool("💬", new Runnable() { public void run() { suggestReplies(); } });
-        tool("📋", new Runnable() { public void run() { setMode(mode == MODE_KEYS ? MODE_CLIP : MODE_KEYS); } });
-        tool("😊", new Runnable() { public void run() { setMode(mode == MODE_EMOJI ? MODE_KEYS : MODE_EMOJI); } });
+        clipTool = tool("📋", new Runnable() { public void run() { setMode(mode == MODE_KEYS ? MODE_CLIP : MODE_KEYS); } });
+        emojiTool = tool("😊", new Runnable() { public void run() { setMode(mode == MODE_EMOJI ? MODE_KEYS : MODE_EMOJI); } });
         latestChip = tool("📎", new Runnable() { public void run() { pasteLatest(); } });
         tool("Tudo", new Runnable() { public void run() { menu(android.R.id.selectAll); } });
         tool("Copiar", new Runnable() { public void run() { copy(); } });
@@ -396,6 +407,7 @@ public final class LeveIME extends InputMethodService
         t.setGravity(Gravity.CENTER);
         int h = (int) (11 * dp), v = (int) (7 * dp);
         t.setPadding(h, v, h, v);
+        t.setMinHeight((int) (36 * dp)); // alvo de toque confortável
         t.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
                 if (prefs.haptic) view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP,
@@ -415,8 +427,9 @@ public final class LeveIME extends InputMethodService
         toolbar.setBackgroundColor(theme.bar);
         for (int i = 0; i < toolbarRow.getChildCount(); i++) {
             TextView t = (TextView) toolbarRow.getChildAt(i);
+            // compara pelo botão (antes era pela posição e acendia o botão errado depois que entrou o 💬)
             boolean on = (t == selChip && selectMode)
-                    || (i == 0 && (mode == MODE_CLIP || mode == MODE_SEARCH)) || (i == 1 && mode == MODE_EMOJI);
+                    || (t == clipTool && (mode == MODE_CLIP || mode == MODE_SEARCH)) || (t == emojiTool && mode == MODE_EMOJI);
             GradientDrawable g = new GradientDrawable();
             g.setCornerRadius(theme.big ? 18 * dp : 14 * dp);
             // tema Conforto: sem caixas, só o texto (minimalista)
@@ -476,7 +489,7 @@ public final class LeveIME extends InputMethodService
             lp.height = (int) (210 * dp);
             panel.setVisibility(View.VISIBLE);
             keyboard.setVisibility(View.VISIBLE);
-            if (layer == Layouts.NUMPAD) { layer = Layouts.LETTERS; keyboard.configure(prefs, Layouts.build(layer, prefs.numberRow)); }
+            if (layer == Layouts.NUMPAD) { layer = Layouts.LETTERS; keyboard.configure(prefs, Layouts.build(layer, numberRow())); }
             panel.showSearchCursor(true);
         }
         panel.setLayoutParams(lp);
@@ -495,15 +508,9 @@ public final class LeveIME extends InputMethodService
         if (ic == null) return;
         if (selStart != selEnd && selStart >= 0) { ic.commitText("", 1); return; }
         // apaga um emoji inteiro (alguns têm vários caracteres)
-        CharSequence b = ic.getTextBeforeCursor(16, 0);
+        CharSequence b = ic.getTextBeforeCursor(GRAPHEME_LOOKBACK, 0);
         if (b == null || b.length() == 0) { key(KeyEvent.KEYCODE_DEL, 0); return; }
-        java.text.BreakIterator it = java.text.BreakIterator.getCharacterInstance();
-        String str = b.toString();
-        it.setText(str);
-        int end = it.last();
-        int start = it.previous();
-        if (start == java.text.BreakIterator.DONE) start = 0;
-        ic.deleteSurroundingText(Math.max(1, end - start), 0);
+        ic.deleteSurroundingText(lastGraphemeLength(b), 0);
     }
 
     @Override public void onEmojiSpace() {
@@ -753,16 +760,28 @@ public final class LeveIME extends InputMethodService
                 return;
             }
             CharSequence t = first.coerceToText(this);
+            if (isSensitive(clip)) return; // senha copiada de gerenciador/banco: nunca entra no histórico
             CharSequence label = clip.getDescription() == null ? null : clip.getDescription().getLabel();
             boolean fromPostLeve = label != null && "PostLeve".contentEquals(label);
             if (t != null && isNewCopy) { lastCopied = t.toString(); lastCopiedAt = System.currentTimeMillis(); }
-            if (t != null && !(passwordField && isInputViewShown())) {
+            if (t != null && !(passwordField && (viewActive || isInputViewShown()))) {
                 store.offerFromSystem(t.toString(), isNewCopy);
                 if (fromPostLeve) expireLater(t.toString());
                 else if (isNewCopy && feedingNow()) feedPostLeve(t.toString());
             }
             if (isNewCopy) purgeExpired();
         } catch (Exception ignored) { } // alguns sistemas bloqueiam leitura em segundo plano
+    }
+
+    /** Android 13+: apps de senha e bancos marcam o que copiam como "sensível". */
+    static boolean isSensitive(ClipData clip) {
+        try {
+            android.content.ClipDescription d = clip.getDescription();
+            android.os.PersistableBundle ex = d == null || Build.VERSION.SDK_INT < 24 ? null : d.getExtras();
+            return ex != null && ex.getBoolean("android.content.extra.IS_SENSITIVE", false);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private boolean isImage(ClipData clip, android.net.Uri uri) {
@@ -836,6 +855,7 @@ public final class LeveIME extends InputMethodService
 
     @Override
     public void onText(String text) {
+        if (text == null || text.isEmpty()) return;
         if (mode == MODE_SEARCH) {
             panel.setQuery(panel.getQuery() + text);
             panel.showSearchCursor(true);
@@ -924,7 +944,7 @@ public final class LeveIME extends InputMethodService
 
     private void switchLayer(int l) {
         layer = l;
-        keyboard.configure(prefs, Layouts.build(layer, prefs.numberRow));
+        keyboard.configure(prefs, Layouts.build(layer, numberRow()));
         if (l == Layouts.LETTERS) autoShift();
     }
 
@@ -945,14 +965,63 @@ public final class LeveIME extends InputMethodService
                 return;
             }
         }
-        CharSequence b = ic.getTextBeforeCursor(2, 0);
+        CharSequence b = ic.getTextBeforeCursor(GRAPHEME_LOOKBACK, 0);
         if (b == null || b.length() == 0) {
             key(KeyEvent.KEYCODE_DEL, 0);
-        } else if (b.length() == 2 && Character.isSurrogatePair(b.charAt(0), b.charAt(1))) {
-            ic.deleteSurroundingText(2, 0);
         } else {
-            ic.deleteSurroundingText(1, 0);
+            ic.deleteSurroundingText(lastGraphemeLength(b), 0);
         }
+    }
+
+    private static final int GRAPHEME_LOOKBACK = 40;
+
+    /**
+     * Tamanho do último "caractere que você vê": 👍🏽, 👨‍👩‍👧, 🇧🇷, ❤️ e "é" com acento separado
+     * somem com um ⌫ só (antes ficavam pedaços do emoji pra trás).
+     */
+    static int lastGraphemeLength(CharSequence before) {
+        String s = before.toString();
+        int n = s.length();
+        if (n <= 1) return n;
+        char last = s.charAt(n - 1);
+        // caso comum (letra simples, sem acento separado): rápido, sem BreakIterator
+        if (last < 0x0300 && last != 0x200D && !Character.isSurrogate(last)
+                && !(n >= 2 && s.charAt(n - 2) == 0x200D)) return 1;
+        java.text.BreakIterator it = java.text.BreakIterator.getCharacterInstance();
+        it.setText(s);
+        int end = it.last();
+        int start = it.previous();
+        if (start == java.text.BreakIterator.DONE) start = 0;
+        int len = Math.max(1, end - start);
+        // emojis com ZWJ (👨‍👩‍👧) e bandeiras: junta as partes que o BreakIterator antigo separa
+        while (start > 0) {
+            int cpBefore = s.codePointBefore(start);
+            int cpAt = s.codePointAt(start);
+            boolean zwj = cpBefore == 0x200D || cpAt == 0x200D;
+            boolean flag = isRegional(cpAt) && isRegional(cpBefore) && countRegionalBefore(s, start) % 2 == 1;
+            boolean mod = (cpAt >= 0x1F3FB && cpAt <= 0x1F3FF) || cpAt == 0xFE0F || cpAt == 0x20E3
+                    || Character.getType(cpAt) == Character.NON_SPACING_MARK;
+            if (!zwj && !flag && !mod) break;
+            int prev = start - Character.charCount(cpBefore);
+            start = prev;
+            len = n - start;
+            if (!zwj && !mod) break; // bandeira: só um par
+        }
+        return Math.max(1, len);
+    }
+
+    private static boolean isRegional(int cp) { return cp >= 0x1F1E6 && cp <= 0x1F1FF; }
+
+    private static int countRegionalBefore(String s, int idx) {
+        int c = 0;
+        int i = idx;
+        while (i > 0) {
+            int cp = s.codePointBefore(i);
+            if (!isRegional(cp)) break;
+            c++;
+            i -= Character.charCount(cp);
+        }
+        return c;
     }
 
     @Override
@@ -1072,10 +1141,36 @@ public final class LeveIME extends InputMethodService
 
     @Override
     public void onCursor(int steps) {
-        if (mode == MODE_SEARCH) return;
+        if (mode == MODE_SEARCH || steps == 0) return;
+        // jeito rápido: pula direto para a posição (1 comando em vez de dezenas de teclas de seta)
+        if (!selectMode && selStart >= 0 && selStart == selEnd && moveCursorDirect(steps)) return;
         int code = steps < 0 ? KeyEvent.KEYCODE_DPAD_LEFT : KeyEvent.KEYCODE_DPAD_RIGHT;
         int meta = shiftMeta();
         for (int i = 0; i < Math.abs(steps); i++) key(code, meta);
+    }
+
+    private boolean moveCursorDirect(int steps) {
+        InputConnection ic = getCurrentInputConnection();
+        if (ic == null) return false;
+        int n = Math.abs(steps);
+        CharSequence t = steps < 0 ? ic.getTextBeforeCursor(n * 2 + 2, 0) : ic.getTextAfterCursor(n * 2 + 2, 0);
+        if (t == null) return false;
+        String s = t.toString();
+        int moved = 0, count = 0;
+        if (steps < 0) {
+            int i = s.length();
+            while (count < n && i > 0) { int cp = s.codePointBefore(i); i -= Character.charCount(cp); count++; }
+            moved = -(s.length() - i);
+        } else {
+            int i = 0;
+            while (count < n && i < s.length()) { int cp = s.codePointAt(i); i += Character.charCount(cp); count++; }
+            moved = i;
+        }
+        if (moved == 0) return true; // já está no começo/fim
+        int pos = selStart + moved;
+        if (!ic.setSelection(pos, pos)) return false;
+        selStart = selEnd = pos;
+        return true;
     }
 
     private int shiftMeta() {

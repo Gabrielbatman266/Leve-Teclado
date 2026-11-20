@@ -241,16 +241,39 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
 
     String getQuery() { return query; }
 
+    /** "contém" sem diferenciar maiúsculas e sem criar cópia do texto (rápido em textos enormes). */
+    static boolean containsIgnoreCase(String text, String lowerQuery) {
+        int n = text.length(), m = lowerQuery.length();
+        if (m == 0) return true;
+        if (m > n) return false;
+        char f = lowerQuery.charAt(0);
+        char fu = Character.toUpperCase(f);
+        for (int i = 0; i <= n - m; i++) {
+            char c = text.charAt(i);
+            if (c != f && c != fu && Character.toLowerCase(c) != f) continue;
+            if (text.regionMatches(true, i, lowerQuery, 0, m)) return true;
+        }
+        return false;
+    }
+
     void showSearchCursor(boolean typing) {
         search.setText(query.isEmpty() ? (typing ? "🔎 digite…▏" : "🔎 Buscar") : "🔎 " + query + (typing ? "▏" : ""));
     }
 
     @Override public void onClipsChanged() { refresh(); }
 
+    // busca incremental: digitando mais uma letra, só procura dentro do que já tinha achado
+    private String lastQ = "";
+    private int lastTab = -1, lastSize = -1;
+    private java.util.HashSet<ClipStore.Item> lastHits;
+
     void refresh() {
         shown.clear();
         for (int i = 0; i < counts.length; i++) counts[i] = 0;
         String q = query.toLowerCase(Locale.ROOT);
+        boolean narrow = !q.isEmpty() && !lastQ.isEmpty() && q.length() > lastQ.length() && q.startsWith(lastQ)
+                && lastHits != null && lastTab == tab && lastSize == store.version;
+        java.util.HashSet<ClipStore.Item> hits = q.isEmpty() ? null : new java.util.HashSet<ClipStore.Item>();
         for (ClipStore.Item it : store.items) {
             counts[TAB_ALL]++;
             if (it.isImage()) counts[TAB_IMAGE]++; else counts[TAB_TEXT]++;
@@ -259,9 +282,15 @@ final class ClipPanel extends LinearLayout implements ClipStore.Listener {
 
             boolean inTab = tab == TAB_SAVED ? it.pinned : it.matches(kindOf(tab));
             if (!inTab) continue;
-            if (!q.isEmpty() && (it.isImage() || !it.text.toLowerCase(Locale.ROOT).contains(q))) continue;
+            if (!q.isEmpty()) {
+                if (it.isImage()) continue;
+                if (narrow && !lastHits.contains(it)) continue;
+                if (!containsIgnoreCase(it.text, q)) continue;
+                hits.add(it);
+            }
             shown.add(it);
         }
+        lastQ = q; lastHits = hits; lastTab = tab; lastSize = store.version;
         if (shown.isEmpty()) {
             empty.setVisibility(VISIBLE);
             if (!store.isLoaded()) empty.setText("Carregando…");
